@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer periodico para Limpeza e Retencao de Disco
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

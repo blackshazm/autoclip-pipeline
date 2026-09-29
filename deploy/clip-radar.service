@@ -1,0 +1,11 @@
+[Unit]
+Description=Automacao de Cortes - Radar de Hype (Oneshot)
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/clip-automation
+ExecStart=/opt/clip-automation/venv/bin/python -m src.radar_youtube --once
+StandardOutput=journal
+StandardError=journal

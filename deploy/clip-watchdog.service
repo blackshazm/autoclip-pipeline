@@ -1,0 +1,16 @@
+[Unit]
+Description=Automacao de Cortes - Watchdog e Heartbeat Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/clip-automation
+ExecStart=/opt/clip-automation/venv/bin/python -m src.services.watchdog
+Restart=always
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

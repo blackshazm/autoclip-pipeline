@@ -1,0 +1,16 @@
+[Unit]
+Description=Automacao de Cortes - Ingestao e Despacho
+After=network.target docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/clip-automation
+ExecStart=/opt/clip-automation/venv/bin/python -m src.robot1_ingest
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

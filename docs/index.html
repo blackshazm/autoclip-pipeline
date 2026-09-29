@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoClip Pipeline | Esteira Autônoma de Cortes com IA</title>
+  <meta name="description" content="Dashboard e documentação da esteira de produção autônoma de cortes verticais (YouTube Shorts e TikTok) com detecção de outliers e IA.">
+  <meta name="keywords" content="YouTube Shorts, TikTok, Automação de Vídeos, Pipeline IA, Whisper, FFmpeg, Python">
+  <meta name="author" content="AutoClip Automation">
+  
+  <!-- Open Graph / Social Sharing -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="AutoClip Pipeline | Automação de Cortes com IA">
+  <meta property="og:description" content="Esteira autônoma lights-out para mineração, edição vertical 9:16 e publicação de vídeos curtos.">
+
+  <!-- Google Fonts: Outfit & Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Background Glow Orbs -->
+  <div class="glow-orb orb-1"></div>
+  <div class="glow-orb orb-2"></div>
+  <div class="glow-orb orb-3"></div>
+
+  <!-- Navigation Bar -->
+  <header class="navbar" id="mainNavbar">
+    <div class="nav-container">
+      <a href="#hero" class="brand-logo" id="navLogo">
+        <div class="logo-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+          </svg>
+        </div>
+        <span class="brand-text">AutoClip <span class="gradient-text">Engine</span></span>
+      </a>
+
+      <div class="system-status-badge">
+        <span class="pulse-dot"></span>
+        <span class="badge-label">SISTEMA: <strong id="globalSystemStatus">OPERACIONAL</strong></span>
+      </div>
+
+      <nav class="nav-links" id="navLinks">
+        <a href="#arquitetura" class="nav-item">Arquitetura</a>
+        <a href="#modulos" class="nav-item">Módulos</a>
+        <a href="#simulador" class="nav-item">Simulador VPH</a>
+        <a href="#docs" class="nav-item">Documentação</a>
+        <a href="https://github.com" target="_blank" rel="noopener noreferrer" class="btn-github" id="btnGitHubRepo">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
+      </nav>
+
+      <button class="mobile-menu-btn" id="mobileMenuToggle" aria-label="Abrir Menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero-section" id="hero">
+    <div class="container hero-content">
+      <div class="hero-badge">
+        <span class="sparkle-icon">⚡</span>
+        <span>Automação Lights-Out • YouTube Shorts & TikTok</span>
+      </div>
+
+      <h1 class="hero-title">
+        Pipeline Autônomo de <br>
+        <span class="gradient-text">Mineração, Edição & Publicação</span>
+      </h1>
+
+      <p class="hero-subtitle">
+        Uma esteira completa com detecção determinística de vídeos virais via <strong>VPH (Views Per Hour)</strong>, transcrição ASR com <strong>Whisper</strong>, seleção de momentos com <strong>LLM</strong>, renderização 9:16 no <strong>FFmpeg</strong> e postagem com gestão de cotas.
+      </p>
+
+      <div class="hero-actions">
+        <a href="#simulador" class="btn btn-primary" id="btnHeroSimulador">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+          Testar Simulador VPH
+        </a>
+        <a href="#arquitetura" class="btn btn-secondary" id="btnHeroArquitetura">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="3" y1="9" x2="21" y2="9"></line>
+            <line x1="9" y1="21" x2="9" y2="9"></line>
+          </svg>
+          Ver Arquitetura
+        </a>
+      </div>
+
+      <!-- Live Pipeline Stats Cards -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">📡</div>
+          <div class="stat-meta">
+            <span class="stat-value" id="kpiRadarStatus">Radar Ativo</span>
+            <span class="stat-label">Polling RSS Contínuo</span>
+          </div>
+          <span class="stat-pill success">100% Autônomo</span>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon">🎬</div>
+          <div class="stat-meta">
+            <span class="stat-value">9:16 + Whisper</span>
+            <span class="stat-label">Cortes & Legendas Dinâmicas</span>
+          </div>
+          <span class="stat-pill cyan">IA Integrada</span>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon">🛡️</div>
+          <div class="stat-meta">
+            <span class="stat-value">SQLite WAL</span>
+            <span class="stat-label">Lease-Lock & Anti-Duplicidade</span>
+          </div>
+          <span class="stat-pill purple">Zero Concorrência</span>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon">🚀</div>
+          <div class="stat-meta">
+            <span class="stat-value">Multi-Canal</span>
+            <span class="stat-label">YouTube Shorts & TikTok</span>
+          </div>
+          <span class="stat-pill warning">Quota Controlled</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Architecture Flow -->
+  <section class="section architecture-section" id="arquitetura">
+    <div class="container">
+      <div class="section-header text-center">
+        <span class="section-tag">Fluxo Determinístico</span>
+        <h2 class="section-title">Como a Esteira Funciona</h2>
+        <p class="section-desc">Arquitetura modular desacoplada com garantia de integridade em todas as etapas.</p>
+      </div>
+
+      <div class="pipeline-flow-wrapper">
+        <div class="flow-track">
+          <!-- Step 1 -->
+          <div class="flow-card active" data-step="0">
+            <div class="flow-step-num">01</div>
+            <div class="flow-header">
+              <span class="flow-icon">🎯</span>
+              <h3>Módulo 0: Radar</h3>
+            </div>
+            <p>Monitora feeds RSS dos canais, calcula VPH relativo e identifica anomalias virais antes de acionar download.</p>
+            <div class="flow-tags">
+              <span>RSS Polling</span>
+              <span>VPH Outlier</span>
+              <span>yt-dlp</span>
+            </div>
+          </div>
+
+          <div class="flow-arrow">➔</div>
+
+          <!-- Step 2 -->
+          <div class="flow-card" data-step="1">
+            <div class="flow-step-num">02</div>
+            <div class="flow-header">
+              <span class="flow-icon">⚙️</span>
+              <h3>Módulo 1: Ingestor</h3>
+            </div>
+            <p>Registra hashes SHA-256 no SQLite WAL, extrai áudio e submete o job ao Supaclip (Whisper + LLM + FFmpeg).</p>
+            <div class="flow-tags">
+              <span>SHA-256</span>
+              <span>SQLite WAL</span>
+              <span>Whisper ASR</span>
+            </div>
+          </div>
+
+          <div class="flow-arrow">➔</div>
+
+          <!-- Step 3 -->
+          <div class="flow-card" data-step="2">
+            <div class="flow-step-num">03</div>
+            <div class="flow-header">
+              <span class="flow-icon">📢</span>
+              <h3>Módulo 2: Publicador</h3>
+            </div>
+            <p>Gera copywriting otimizado via LLM, gerencia leases da fila e realiza upload nas APIs oficiais com controle de cota.</p>
+            <div class="flow-tags">
+              <span>YouTube API</span>
+              <span>TikTok</span>
+              <span>Discord Hook</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dynamic Architecture Detail Box -->
+        <div class="arch-detail-panel" id="archDetailPanel">
+          <div class="panel-header">
+            <div class="panel-title-group">
+              <span class="panel-badge" id="archDetailBadge">MÓDULO 0: RADAR YOUTUBE</span>
+              <h4 id="archDetailTitle">Detecção de Outliers e Extração Otimizada</h4>
+            </div>
+            <div class="panel-dots"><span></span><span></span><span></span></div>
+          </div>
+          <div class="panel-body">
+            <div class="panel-col">
+              <p id="archDetailText">
+                O Radar escuta os feeds XML de canais cadastrados em <code>config/channels.json</code>. Ao detectar um novo upload, calcula a velocidade de visualizações por hora:
+              </p>
+              <div class="code-preview" id="archCodePreview">
+                <code>VPH = total_views / ((now - published_at_hours) || 1)</code>
+              </div>
+              <ul class="checklist" id="archChecklist">
+                <li>Ignora vídeos já registrados no banco local.</li>
+                <li>Download de vídeos longos somente se VPH ultrapassar o multiplicador (ex: 2.5x).</li>
+                <li>Uso de rotação de user-agents e cookies para segurança de rede.</li>
+              </ul>
+            </div>
+            <div class="panel-col json-preview">
+              <div class="json-header">
+                <span>Payload de Evento (Radar ➔ Ingestor)</span>
+                <button class="copy-mini-btn" id="btnCopyJson">Copiar</button>
+              </div>
+              <pre><code id="archJsonCode">{
+  "video_id": "dQw4w9WgXcQ",
+  "title": "Como Dominar IA em 2026",
+  "channel_id": "UC_x5XG1OV2P6uZZ5FSM9Ttw",
+  "vph_score": 4820.5,
+  "threshold_vph": 1800.0,
+  "is_outlier": true,
+  "download_path": "data/videos_longos/dQw4w9WgXcQ.mp4"
+}</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive VPH Simulator -->
+  <section class="section simulator-section" id="simulador">
+    <div class="container">
+      <div class="section-header text-center">
+        <span class="section-tag">Calculadora em Tempo Real</span>
+        <h2 class="section-title">Simulador de Decisão VPH</h2>
+        <p class="section-desc">Experimente os parâmetros do algoritmo para ver quando um vídeo é classificado como outlier viral.</p>
+      </div>
+
+      <div class="simulator-wrapper">
+        <div class="sim-inputs-card">
+          <h3 class="sim-card-title">Parâmetros do Vídeo</h3>
+          
+          <div class="input-group">
+            <label for="inputViews">Visualizações Atuais:</label>
+            <div class="input-field-wrapper">
+              <input type="number" id="inputViews" value="38500" min="0" step="500">
+              <span class="input-unit">views</span>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label for="inputHours">Tempo de Publicação:</label>
+            <div class="input-field-wrapper">
+              <input type="number" id="inputHours" value="4.5" min="0.1" step="0.5">
+              <span class="input-unit">horas</span>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label for="inputAvgVph">Média Histórica do Canal (VPH):</label>
+            <div class="input-field-wrapper">
+              <input type="number" id="inputAvgVph" value="2200" min="100" step="100">
+              <span class="input-unit">vph</span>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label for="inputMultiplier">Fator Multiplicador de Outlier:</label>
+            <div class="input-field-wrapper">
+              <input type="number" id="inputMultiplier" value="2.5" min="1.1" max="10.0" step="0.1">
+              <span class="input-unit">x</span>
+            </div>
+          </div>
+
+          <button class="btn btn-primary btn-block" id="btnRecalculateSim">
+            Simular Disparo do Pipeline
+          </button>
+        </div>
+
+        <div class="sim-result-card" id="simResultBox">
+          <div class="result-badge-top">
+            <span class="status-indicator-light" id="simStatusLight"></span>
+            <span id="simStatusHeadline">ANALISANDO POTENCIAL...</span>
+          </div>
+
+          <div class="result-kpis">
+            <div class="result-kpi-item">
+              <span class="kpi-label">VPH Calculado</span>
+              <span class="kpi-value" id="kpiCalculatedVph">8.555/h</span>
+            </div>
+            <div class="result-kpi-item">
+              <span class="kpi-label">Threshold Mínimo</span>
+              <span class="kpi-value" id="kpiThresholdVph">5.500/h</span>
+            </div>
+            <div class="result-kpi-item">
+              <span class="kpi-label">Razão de Viralização</span>
+              <span class="kpi-value highlight" id="kpiRatio">3.88x</span>
+            </div>
+          </div>
+
+          <div class="decision-box" id="decisionBox">
+            <div class="decision-icon" id="decisionIcon">🔥</div>
+            <div class="decision-texts">
+              <strong id="decisionTitle">Aprovação para Ingestão Imediata</strong>
+              <p id="decisionDescription">O vídeo superou o limiar de outlier em 3.88x. O Módulo 0 iniciará o download em MP4 e enviará para o Supaclip.</p>
+            </div>
+          </div>
+
+          <div class="sim-timeline">
+            <div class="timeline-step done">
+              <span class="dot"></span>
+              <span>1. RSS Polled</span>
+            </div>
+            <div class="timeline-step done" id="stepVph">
+              <span class="dot"></span>
+              <span>2. VPH Superado</span>
+            </div>
+            <div class="timeline-step done" id="stepDownload">
+              <span class="dot"></span>
+              <span>3. Download yt-dlp</span>
+            </div>
+            <div class="timeline-step done" id="stepQueue">
+              <span class="dot"></span>
+              <span>4. Fila SQLite</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quick Documentation & Deployment Guides -->
+  <section class="section docs-section" id="docs">
+    <div class="container">
+      <div class="section-header text-center">
+        <span class="section-tag">Engenharia & Operação</span>
+        <h2 class="section-title">Comandos de Inicialização e Deploy</h2>
+        <p class="section-desc">Execute o pipeline localmente ou coloque os daemons em segundo plano.</p>
+      </div>
+
+      <div class="docs-tabs-wrapper">
+        <div class="tab-buttons">
+          <button class="tab-btn active" data-tab="tab-local">Execução Local</button>
+          <button class="tab-btn" data-tab="tab-systemd">Serviços Systemd</button>
+          <button class="tab-btn" data-tab="tab-tests">Bateria de Testes</button>
+          <button class="tab-btn" data-tab="tab-pages">Deploy no GitHub Pages</button>
+        </div>
+
+        <div class="tab-contents">
+          <!-- Tab 1: Local -->
+          <div class="tab-pane active" id="tab-local">
+            <div class="code-container">
+              <div class="code-topbar">
+                <span>Bash / PowerShell</span>
+                <button class="copy-btn" data-target="codeLocal">Copiar</button>
+              </div>
+              <pre><code id="codeLocal"># 1. Configurar variáveis de ambiente
+cp .env.example .env
+
+# 2. Instalar dependências Python
+pip install -r requirements.txt
+
+# 3. Executar o pipeline autônomo completo
+python run_pipeline.py
+
+# Ou rodar o script de demonstração end-to-end:
+python demo_full_pipeline.py</code></pre>
+            </div>
+          </div>
+
+          <!-- Tab 2: Systemd -->
+          <div class="tab-pane" id="tab-systemd">
+            <div class="code-container">
+              <div class="code-topbar">
+                <span>Linux Server (deploy/*.service)</span>
+                <button class="copy-btn" data-target="codeSystemd">Copiar</button>
+              </div>
+              <pre><code id="codeSystemd"># Copiar os arquivos de serviço para o systemd
+sudo cp deploy/*.service deploy/*.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# Ativar e iniciar os serviços autônomos
+sudo systemctl enable --now clip-radar.timer
+sudo systemctl enable --now clip-ingest.service
+sudo systemctl enable --now clip-publish.service
+sudo systemctl enable --now clip-watchdog.service</code></pre>
+            </div>
+          </div>
+
+          <!-- Tab 3: Tests -->
+          <div class="tab-pane" id="tab-tests">
+            <div class="code-container">
+              <div class="code-topbar">
+                <span>Pytest com Cobertura</span>
+                <button class="copy-btn" data-target="codeTests">Copiar</button>
+              </div>
+              <pre><code id="codeTests"># Rodar todos os testes unitários e de integração
+pytest -v
+
+# Rodar especificamente os testes de banco e transação WAL
+pytest tests/test_database.py -v
+
+# Verificar testes de quota e rate limit
+pytest tests/test_publish_quota.py -v</code></pre>
+            </div>
+          </div>
+
+          <!-- Tab 4: GitHub Pages -->
+          <div class="tab-pane" id="tab-pages">
+            <div class="code-container">
+              <div class="code-topbar">
+                <span>Publicar esta página no GitHub Pages</span>
+                <button class="copy-btn" data-target="codePages">Copiar</button>
+              </div>
+              <pre><code id="codePages"># 1. Inicializar git e comitar arquivos
+git init
+git add .
+git commit -m "feat: adicionar documentação e dashboard web para GitHub Pages"
+
+# 2. Conectar ao seu repositório remoto
+git remote add origin https://github.com/SEU_USUARIO/SEU_REPOSITORIO.git
+git branch -M main
+git push -u origin main
+
+# 3. No GitHub: acesse Settings -> Pages -> Source: 'Deploy from a branch' -> Branch: 'main', Folder: '/docs' -> Salvar!</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container footer-content">
+      <div class="footer-brand">
+        <div class="logo-icon mini">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+          </svg>
+        </div>
+        <span>AutoClip Pipeline Engine</span>
+      </div>
+
+      <p class="footer-copyright">
+        Esteira Autônoma de Produção Audiovisual. Código aberto e determinístico.
+      </p>
+
+      <div class="footer-links">
+        <a href="#hero">Início</a>
+        <a href="#arquitetura">Arquitetura</a>
+        <a href="#simulador">Simulador</a>
+        <a href="https://github.com" target="_blank" rel="noopener noreferrer">Repositório GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

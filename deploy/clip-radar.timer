@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer periodico para Radar de Hype YouTube
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
