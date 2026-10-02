@@ -31,37 +31,68 @@ def get_next_available_slot(account_id: int, platform: str, conn: sqlite3.Connec
 
     cursor = conn.cursor()
     cursor.execute("""
+        SELECT posting_windows, min_interval_minutes
+        FROM publishing_accounts
+        WHERE id = ?;
+    """, (account_id,))
+    acc_row = cursor.fetchone()
+
+    interval_minutes = settings.POST_INTERVAL_MINUTES
+    windows = None
+    if acc_row:
+        if acc_row["min_interval_minutes"]:
+            interval_minutes = int(acc_row["min_interval_minutes"])
+        if acc_row["posting_windows"]:
+            try:
+                windows = json.loads(acc_row["posting_windows"])
+            except Exception:
+                pass
+
+    min_interval = timedelta(minutes=interval_minutes)
+
+    cursor.execute("""
         SELECT MAX(scheduled_for) as last_sched
         FROM publications
         WHERE publishing_account_id = ? AND platform = ? AND status IN ('SCHEDULED', 'UPLOADING', 'POSTED');
     """, (account_id, platform))
     row = cursor.fetchone()
 
-    min_interval = timedelta(minutes=settings.POST_INTERVAL_MINUTES)
     base_time = now_local
 
     if row and row["last_sched"]:
         try:
-            last_dt = datetime.fromisoformat(row["last_sched"]).astimezone(tz)
+            clean_sched = row["last_sched"].replace("Z", "+00:00")
+            last_dt = datetime.fromisoformat(clean_sched).astimezone(tz)
             if last_dt + min_interval > base_time:
                 base_time = last_dt + min_interval
         except Exception:
             pass
 
-    windows = sorted(settings.DEFAULT_POSTING_WINDOWS)
+    # Se não houver janelas definidas na conta, gera janelas contínuas baseadas no intervalo
+    if not windows:
+        if interval_minutes <= 60:
+            windows = [f"{h:02d}:{m:02d}" for h in range(24) for m in range(0, 60, max(5, interval_minutes))]
+        else:
+            windows = sorted(settings.DEFAULT_POSTING_WINDOWS)
+    else:
+        windows = sorted(windows)
+
     candidate_date = base_time.date()
 
     for day_offset in range(14): # Procura nos próximos 14 dias
         current_day = candidate_date + timedelta(days=day_offset)
         for window_str in windows:
-            hour, minute = map(int, window_str.split(":"))
-            jitter_seconds = random.randint(30, 300)
+            try:
+                hour, minute = map(int, window_str.split(":"))
+            except Exception:
+                continue
+            jitter_seconds = random.randint(10, 60) if interval_minutes <= 15 else random.randint(30, 180)
             slot = datetime(current_day.year, current_day.month, current_day.day, hour, minute, tzinfo=tz) + timedelta(seconds=jitter_seconds)
 
             if slot >= base_time:
                 return slot.astimezone(timezone.utc)
 
-    # Fallback seguro: 3 horas a partir de agora
+    # Fallback seguro: intervalo a partir de agora
     return (now_local + min_interval).astimezone(timezone.utc)
 
 def schedule_pending_clips() -> int:
@@ -88,18 +119,37 @@ def schedule_pending_clips() -> int:
             logger.warning("Nenhuma conta de publicação ativa encontrada.")
             return 0
 
-        # 3. Busca clips aprovados que possuem metadados gerados ordenados por virality_score DESC
-        cursor.execute("""
-            SELECT id, clip_uid, virality_score, title, created_at
-            FROM clips
-            WHERE virality_score >= ? 
-              AND moderation_status = 'APPROVED'
-              AND title IS NOT NULL
-            ORDER BY virality_score DESC, created_at DESC;
-        """, (settings.MIN_VIRALITY_SCORE,))
-        clips = cursor.fetchall()
+        from src.services.overlap_filter import filter_overlapping_clips, round_robin_interleave
 
-        for clip in clips:
+        # 3. Busca clips aprovados que possuem metadados gerados
+        cursor.execute("""
+            SELECT c.id, c.clip_uid, c.virality_score, c.title, c.created_at, 
+                   c.series_id, c.part_number, c.total_parts,
+                   c.long_video_id, c.start_seconds, c.end_seconds, c.duration_seconds,
+                   lv.source_channel_id
+            FROM clips c
+            LEFT JOIN long_videos lv ON c.long_video_id = lv.id
+            WHERE c.virality_score >= ? 
+              AND c.moderation_status = 'APPROVED'
+              AND c.title IS NOT NULL;
+        """, (settings.MIN_VIRALITY_SCORE,))
+        raw_clips = [dict(r) for r in cursor.fetchall()]
+
+        # 3.1 Filtra cortes com sobreposição temporal excessiva (> 25% de trecho duplicado)
+        valid_clips, discarded_clips = filter_overlapping_clips(raw_clips, max_overlap_threshold=0.25)
+        for disc in discarded_clips:
+            reason = disc.get("_overlap_reason", "Sobreposição temporal detectada")
+            cursor.execute("""
+                UPDATE clips
+                SET youtube_status = 'SKIPPED_OVERLAP', tiktok_status = 'SKIPPED_OVERLAP', error_log = ?
+                WHERE id = ? AND (youtube_status = 'PENDING' OR youtube_status IS NULL);
+            """, (reason, disc["id"]))
+            logger.info(f"Corte {disc.get('clip_uid')} descartado do agendamento: {reason}")
+
+        # 3.2 Intercala os cortes válidos em Round-Robin (evita canais e episódios repetidos em sequência)
+        interleaved_clips = round_robin_interleave(valid_clips, group_key="long_video_id", secondary_key="source_channel_id")
+
+        for clip in interleaved_clips:
             clip_id = clip["id"]
             clip_uid = clip["clip_uid"]
 

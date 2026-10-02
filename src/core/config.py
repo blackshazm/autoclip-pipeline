@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     SUPOCLIP_API_URL: str = Field(default="http://localhost:8000")
     SUPOCLIP_TIMEOUT_SECONDS: int = Field(default=600)
     SUPOCLIP_MAX_RETRIES: int = Field(default=3)
-    SUPOCLIP_USER_ID: str = Field(default="qJHay5ukwhNUBiYTSb3FJcIdrPFNg8RG")
+    SUPOCLIP_USER_ID: str = Field(default="")
     SUPOCLIP_AUTH_SECRET: str = Field(default="change_me_backend_auth_secret")
     SUPOCLIP_API_KEY: str = Field(default="")
     MOCK_SUPOCLIP: bool = Field(default=False)
@@ -43,8 +43,8 @@ class Settings(BaseSettings):
     RADAR_MIN_AGE_HOURS: int = Field(default=2)
     RADAR_MAX_AGE_HOURS: int = Field(default=48)
     RADAR_IGNORE_AFTER_DAYS: int = Field(default=7)
-    MAX_DOWNLOADS_PER_CYCLE: int = Field(default=4)
-    MAX_DAILY_DOWNLOADS: int = Field(default=16)
+    MAX_DOWNLOADS_PER_CYCLE: int = Field(default=15)
+    MAX_DAILY_DOWNLOADS: int = Field(default=100)
 
     # Agendamento e Buffer Anti-Spam
     TIMEZONE: str = Field(default="America/Sao_Paulo")
@@ -61,25 +61,35 @@ class Settings(BaseSettings):
     KEEP_POSTED_CLIPS_HOURS: int = Field(default=48)
 
     # Credenciais YouTube
+    YOUTUBE_PUBLISHER_MODE: str = Field(default="api")  # "api" ou "browser"
     YTDLP_COOKIES_PATH: Path = Field(default=Path("./config/cookies.txt"))
     YOUTUBE_API_KEY: str = Field(default="")
     YOUTUBE_CLIENT_SECRETS: Path = Field(default=Path("./config/client_secrets.json"))
     YOUTUBE_TOKEN_PATH: Path = Field(default=Path("./config/youtube_token.json"))
     YOUTUBE_DATA_API_MAX_QUOTA_UNITS_PER_DAY: int = Field(default=9000)
-    YOUTUBE_DAILY_UPLOAD_LIMIT: int = Field(default=10)
+    YOUTUBE_DAILY_UPLOAD_LIMIT: int = Field(default=100)
+    YOUTUBE_BROWSER_PROFILE_DIR: Path = Field(default=Path("./data/youtube_browser_profile"))
+    YOUTUBE_BROWSER_STATE_FILE: Path = Field(default=Path("./config/youtube_state.json"))
+    YOUTUBE_BROWSER_HEADLESS: bool = Field(default=True)
+    YOUTUBE_BROWSER_FALLBACK_TO_API: bool = Field(default=True)
 
-    # Credenciais TikTok
-    TIKTOK_MODE: str = Field(default="official")
+    # Credenciais e Automação TikTok
+    TIKTOK_PUBLISHER_MODE: str = Field(default="browser")  # "browser" ou "official"
+    TIKTOK_BROWSER_PROFILE_DIR: Path = Field(default=Path("./data/tiktok_browser_profile"))
+    TIKTOK_BROWSER_STATE_FILE: Path = Field(default=Path("./config/tiktok_state.json"))
+    TIKTOK_BROWSER_HEADLESS: bool = Field(default=True)
+    TIKTOK_BROWSER_FALLBACK_TO_API: bool = Field(default=False)
+    TIKTOK_MODE: str = Field(default="browser")
     TIKTOK_ACCESS_TOKEN: str = Field(default="")
     TIKTOK_OPEN_ID: str = Field(default="")
 
     # LLM / Copywriting (Hermes / OpenAI)
     OPENAI_API_KEY: str = Field(default="local-hermes")
     OPENAI_BASE_URL: str = Field(default="http://localhost:11434/v1")
-    OPENAI_MODEL: str = Field(default="hermes-3-llama-3.1-8b")
-    LLM_TIMEOUT_SECONDS: int = Field(default=30)
+    OPENAI_MODEL: str = Field(default="gemma3:4b")
+    LLM_TIMEOUT_SECONDS: int = Field(default=120)
     LLM_TEMPERATURE: float = Field(default=0.3)
-    LLM_MAX_RETRIES: int = Field(default=1)
+    LLM_MAX_RETRIES: int = Field(default=2)
 
     # Notificações e Webhooks
     DISCORD_WEBHOOK_URL: str = Field(default="")
@@ -106,6 +116,10 @@ class Settings(BaseSettings):
         self.YTDLP_COOKIES_PATH = (self.BASE_DIR / self.YTDLP_COOKIES_PATH).resolve()
         self.YOUTUBE_CLIENT_SECRETS = (self.BASE_DIR / self.YOUTUBE_CLIENT_SECRETS).resolve()
         self.YOUTUBE_TOKEN_PATH = (self.BASE_DIR / self.YOUTUBE_TOKEN_PATH).resolve()
+        self.YOUTUBE_BROWSER_PROFILE_DIR = (self.BASE_DIR / self.YOUTUBE_BROWSER_PROFILE_DIR).resolve()
+        self.YOUTUBE_BROWSER_STATE_FILE = (self.BASE_DIR / self.YOUTUBE_BROWSER_STATE_FILE).resolve()
+        self.TIKTOK_BROWSER_PROFILE_DIR = (self.BASE_DIR / self.TIKTOK_BROWSER_PROFILE_DIR).resolve()
+        self.TIKTOK_BROWSER_STATE_FILE = (self.BASE_DIR / self.TIKTOK_BROWSER_STATE_FILE).resolve()
 
         # Cria diretórios necessários
         self.WATCH_DIR.mkdir(parents=True, exist_ok=True)

@@ -119,6 +119,9 @@ CREATE TABLE IF NOT EXISTS clips (
     is_deleted_from_disk INTEGER DEFAULT 0,
     published_at TIMESTAMP,
     error_log TEXT,
+    series_id TEXT,
+    part_number INTEGER DEFAULT 1,
+    total_parts INTEGER DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -254,6 +257,19 @@ CREATE TABLE IF NOT EXISTS system_heartbeats (
     last_ping TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     status TEXT,
     extra_info TEXT
+);
+
+-- 16. Sinais e Telemetria em Tempo Real dos Processos
+CREATE TABLE IF NOT EXISTS process_signals (
+    process_name TEXT PRIMARY KEY,
+    display_name TEXT,
+    task_name TEXT,
+    current_step INTEGER DEFAULT 0,
+    total_steps INTEGER DEFAULT 0,
+    status TEXT, -- 'IDLE', 'RUNNING', 'COMPLETED', 'FAILED'
+    message TEXT,
+    last_updated TEXT,
+    extra_json TEXT
 );
 
 -- ========================================================

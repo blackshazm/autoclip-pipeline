@@ -83,12 +83,47 @@ def check_dead_letter_queue() -> int:
 
     return fatal_count
 
+_last_cleanup_timestamp: float = 0.0
+CLEANUP_INTERVAL_SECONDS: int = 3600  # 1 hora
+
 def run_watchdog_check():
-    """Executa checagem única de saúde."""
-    record_heartbeat("watchdog", "OK", "Watchdog check executed")
+    """Executa checagem única de saúde e rotina periódica de limpeza de disco."""
+    global _last_cleanup_timestamp
+    record_heartbeat("watchdog", "OK", "Watchdog ativo e monitorando")
     stale = check_heartbeats()
     fatal = check_dead_letter_queue()
     logger.info(f"Watchdog executado: {len(stale)} serviços estagnados, {fatal} itens em DLQ.")
 
+    # Rotina automática de retenção e limpeza de disco a cada 1 hora
+    now = time.time()
+    if now - _last_cleanup_timestamp >= CLEANUP_INTERVAL_SECONDS:
+        try:
+            from src.services.cleanup import run_disk_cleanup
+            cleanup_res = run_disk_cleanup()
+            _last_cleanup_timestamp = now
+            logger.info(f"Limpeza de retenção de disco executada com sucesso: {cleanup_res}")
+        except Exception as ce:
+            logger.error(f"Erro ao executar limpeza de retenção de disco: {ce}", exc_info=True)
+
+def run_watchdog_loop(interval_seconds: int = 60):
+    """Executa monitoramento contínuo em loop com tolerância a falhas."""
+    logger.info(f"Iniciando Watchdog Guardião contínuo (intervalo: {interval_seconds}s)...")
+    while True:
+        try:
+            run_watchdog_check()
+        except Exception as e:
+            logger.error(f"Erro na execução do ciclo de watchdog: {e}")
+            record_heartbeat("watchdog", "ERROR", f"Erro: {str(e)[:100]}")
+        time.sleep(interval_seconds)
+
 if __name__ == "__main__":
-    run_watchdog_check()
+    import argparse
+    parser = argparse.ArgumentParser(description="Watchdog Guardião de Integridade Operacional")
+    parser.add_argument("--once", action="store_true", help="Executa checagem única e encerra")
+    parser.add_argument("--interval", type=int, default=60, help="Intervalo em segundos entre checagens (padrão: 60s)")
+    args = parser.parse_args()
+
+    if args.once:
+        run_watchdog_check()
+    else:
+        run_watchdog_loop(interval_seconds=args.interval)

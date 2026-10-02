@@ -14,7 +14,7 @@ CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
 TOKEN_FILE = CONFIG_DIR / "tiktok_token.json"
 
 PORT = 8088
-REDIRECT_URI = f"http://localhost:{PORT}/callback"
+REDIRECT_URI = "https://blackshazm.github.io/autoclip-pipeline/callback.html"
 
 class TikTokAuthHandler(http.server.SimpleHTTPRequestHandler):
     auth_code = None
@@ -32,7 +32,7 @@ class TikTokAuthHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-def authenticate_tiktok(client_key: str, client_secret: str):
+def authenticate_tiktok(client_key: str, client_secret: str, code: str = None):
     """
     Gera URL de autorização do TikTok e aguarda o código de autorização para trocar pelo Access Token.
     """
@@ -48,23 +48,27 @@ def authenticate_tiktok(client_key: str, client_secret: str):
         f"state=you1_state"
     )
 
-    print("\n" + "=" * 65)
-    print("🔗 LINK DE AUTORIZAÇÃO DO TIKTOK:")
-    print(auth_url)
-    print("=" * 65 + "\n")
-    print(f"Aguardando autorização no navegador na porta {PORT}...")
+    if not code:
+        print("\n" + "=" * 65)
+        print("🔗 LINK DE AUTORIZAÇÃO DO TIKTOK:")
+        print(auth_url)
+        print("=" * 65 + "\n")
+        print("1. Abra o link acima no seu navegador (caso não abra sozinho).")
+        print("2. Faça login e autorize o aplicativo.")
+        print("3. Você será redirecionado para a página do GitHub Pages com seu código.")
+        
+        try:
+            webbrowser.open(auth_url)
+        except Exception:
+            pass
 
-    try:
-        webbrowser.open(auth_url)
-    except Exception:
-        pass
+        code = input("\n👉 Cole o código de autorização aqui (ou pressione Enter se já configurou): ").strip()
 
-    with socketserver.TCPServer(("", PORT), TikTokAuthHandler) as httpd:
-        while not TikTokAuthHandler.auth_code:
-            httpd.handle_request()
+    if not code:
+        print("❌ Código de autorização não fornecido.")
+        return None
 
-    code = TikTokAuthHandler.auth_code
-    print(f"\n[OK] Código de autorização recebido: {code[:10]}...")
+    print(f"\n[OK] Processando código de autorização: {code[:10]}...")
 
     # Troca code por access_token
     token_url = "https://open.tiktokapis.com/v2/oauth/token/"
@@ -97,9 +101,19 @@ def authenticate_tiktok(client_key: str, client_secret: str):
 
 if __name__ == "__main__":
     import sys
-    ck = input("Digite seu Client Key do TikTok: ").strip()
-    cs = input("Digite seu Client Secret do TikTok: ").strip()
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(description="Autenticador TikTok OAuth2")
+    parser.add_argument("--key", default=os.getenv("TIKTOK_CLIENT_KEY", ""), help="TikTok Client Key")
+    parser.add_argument("--secret", default=os.getenv("TIKTOK_CLIENT_SECRET", ""), help="TikTok Client Secret")
+    parser.add_argument("--code", default=None, help="Código de autorização retornado pela URL")
+    args = parser.parse_args()
+
+    ck = args.key or input("Digite seu Client Key do TikTok: ").strip()
+    cs = args.secret or input("Digite seu Client Secret do TikTok: ").strip()
+    
     if ck and cs:
-        authenticate_tiktok(ck, cs)
+        authenticate_tiktok(ck, cs, code=args.code)
     else:
         print("Client Key ou Client Secret vazios.")

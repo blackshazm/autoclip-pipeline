@@ -22,6 +22,7 @@ from src.services.youtube_metrics import (
 )
 from src.services.downloader import download_youtube_video
 from src.services.watchdog import record_heartbeat
+from src.core.process_signals import SignalTracker
 
 logger = get_logger("radar_youtube")
 
@@ -108,101 +109,124 @@ def run_radar_cycle(dry_run: bool = False) -> int:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM source_channels WHERE active = 1;")
-        channels = cursor.fetchall()
+        channels = [dict(r) for r in cursor.fetchall()]
 
-        if not channels:
-            logger.warning("Nenhum canal ativo configurado em source_channels.")
-            return 0
+    if not channels:
+        logger.warning("Nenhum canal ativo configurado em source_channels.")
+        SignalTracker.emit_finish("radar_youtube", "Nenhum canal ativo para monitorar", success=True)
+        return 0
 
-        for channel in channels:
-            channel_id = channel["id"]
-            channel_name = channel["name"]
-            rss_url = channel["rss_url"]
-            min_duration = channel["min_duration_minutes"] * 60
-            vph_threshold = channel["vph_absolute_threshold"]
-            multiplier_threshold = channel["vph_multiplier_threshold"]
-            median_vph = channel["median_vph"] or 1500.0
+    SignalTracker.emit_start(
+        "radar_youtube",
+        "Varredura de Canais",
+        total_steps=len(channels),
+        message=f"Monitorando {len(channels)} canais ativos"
+    )
 
-            logger.info(f"Varrendo canal '{channel_name}'...", extra={"event": "radar_scan_channel", "channel": channel_name})
-            feed_entries = fetch_channel_feed(rss_url, channel_ref=channel["youtube_channel_id"])
+    for ch_idx, channel in enumerate(channels, 1):
+        channel_id = channel["id"]
+        channel_name = channel["name"]
+        rss_url = channel["rss_url"]
+        min_duration = channel["min_duration_minutes"] * 60
+        vph_threshold = channel["vph_absolute_threshold"]
+        multiplier_threshold = channel["vph_multiplier_threshold"]
+        median_vph = channel["median_vph"] or 1500.0
 
-            for entry in feed_entries:
-                yt_id = entry["youtube_id"]
+        SignalTracker.emit_progress(
+            "radar_youtube",
+            ch_idx,
+            len(channels),
+            f"Canal {ch_idx}/{len(channels)}: Analisando '{channel_name}'"
+        )
+        logger.info(f"Varrendo canal '{channel_name}'...", extra={"event": "radar_scan_channel", "channel": channel_name})
+        feed_entries = fetch_channel_feed(rss_url, channel_ref=channel["youtube_channel_id"])
 
-                # 1. Checa se o vídeo já foi ingerido ou baixado ou rejeitado
+        for entry in feed_entries:
+            yt_id = entry["youtube_id"]
+
+            # 1. Checa se o vídeo já foi ingerido ou baixado ou rejeitado (transação pontual)
+            with get_db() as conn:
+                cursor = conn.cursor()
                 cursor.execute("SELECT status, downloaded_at FROM radar_candidates WHERE youtube_id = ?;", (yt_id,))
-                existing_candidate = cursor.fetchone()
-                if existing_candidate:
-                    cand_status = existing_candidate["status"]
-                    # Se foi rejeitado ou já baixado com sucesso, pula
-                    if cand_status in ("DOWNLOADED", "REJECTED"):
-                        continue
-                    # Se já está em long_videos, pula
-                    cursor.execute("SELECT id FROM long_videos WHERE youtube_id = ?;", (yt_id,))
-                    if cursor.fetchone():
-                        continue
-                    # Se já está QUALIFICADO mas ainda não foi baixado, realiza o download
-                    if cand_status == "QUALIFIED" and not existing_candidate["downloaded_at"]:
-                        if not dry_run and downloads_count < settings.MAX_DOWNLOADS_PER_CYCLE:
-                            downloaded_path = download_youtube_video(yt_id)
-                            if downloaded_path and downloaded_path.exists():
-                                cursor.execute("""
+                row_cand = cursor.fetchone()
+                existing_candidate = dict(row_cand) if row_cand else None
+                cursor.execute("SELECT id FROM long_videos WHERE youtube_id = ?;", (yt_id,))
+                already_in_long_videos = cursor.fetchone() is not None
+
+            if existing_candidate:
+                cand_status = existing_candidate["status"]
+                # Se foi rejeitado ou já baixado com sucesso, pula
+                if cand_status in ("DOWNLOADED", "REJECTED"):
+                    continue
+                # Se já está em long_videos, pula
+                if already_in_long_videos:
+                    continue
+                # Se já está QUALIFICADO mas ainda não foi baixado, realiza o download
+                if cand_status == "QUALIFIED" and not existing_candidate.get("downloaded_at"):
+                    if not dry_run and downloads_count < settings.MAX_DOWNLOADS_PER_CYCLE:
+                        downloaded_path = download_youtube_video(yt_id)
+                        if downloaded_path and downloaded_path.exists():
+                            with get_db() as conn:
+                                conn.cursor().execute("""
                                     UPDATE radar_candidates
                                     SET status = 'DOWNLOADED', downloaded_at = datetime('now')
                                     WHERE youtube_id = ?;
                                 """, (yt_id,))
-                                downloads_count += 1
-                        continue
-
-                # 2. Coleta métricas analíticas
-                metrics = fetch_video_metrics(yt_id)
-                if not metrics:
+                            downloads_count += 1
                     continue
 
-                pub_dt = metrics["published_at"]
-                now_utc = datetime.now(timezone.utc)
-                age_hours = (now_utc - pub_dt).total_seconds() / 3600.0
+            # 2. Coleta métricas analíticas
+            metrics = fetch_video_metrics(yt_id)
+            if not metrics:
+                continue
 
-                # Regra de amostragem temporal: ignora temporariamente vídeos com menos de 2h
-                if age_hours < settings.RADAR_MIN_AGE_HOURS:
-                    logger.debug(f"Vídeo {yt_id} muito recente ({age_hours:.1f}h). Aguardando maturação de métricas.")
-                    cursor.execute("""
+            pub_dt = metrics["published_at"]
+            now_utc = datetime.now(timezone.utc)
+            age_hours = (now_utc - pub_dt).total_seconds() / 3600.0
+
+            # Regra de amostragem temporal: ignora temporariamente vídeos com menos de 2h
+            if age_hours < settings.RADAR_MIN_AGE_HOURS:
+                logger.debug(f"Vídeo {yt_id} muito recente ({age_hours:.1f}h). Aguardando maturação de métricas.")
+                with get_db() as conn:
+                    conn.cursor().execute("""
                         INSERT INTO radar_candidates (source_channel_id, youtube_id, title, published_at, status, last_checked_at)
                         VALUES (?, ?, ?, ?, 'MONITORING', datetime('now'))
                         ON CONFLICT(youtube_id) DO UPDATE SET last_checked_at = datetime('now');
                     """, (channel_id, yt_id, metrics["title"], pub_dt.isoformat()))
-                    continue
+                continue
 
-                # Ignora vídeos excessivamente antigos (> 48h)
-                if age_hours > settings.RADAR_MAX_AGE_HOURS:
-                    cursor.execute("""
+            # Ignora vídeos excessivamente antigos (> 48h)
+            if age_hours > settings.RADAR_MAX_AGE_HOURS:
+                with get_db() as conn:
+                    conn.cursor().execute("""
                         INSERT INTO radar_candidates (source_channel_id, youtube_id, title, published_at, status, reject_reason)
                         VALUES (?, ?, ?, ?, 'REJECTED', 'Vídeo com idade acima de 48h')
                         ON CONFLICT(youtube_id) DO UPDATE SET status = 'REJECTED', reject_reason = 'Idade > 48h';
                     """, (channel_id, yt_id, metrics["title"], pub_dt.isoformat()))
-                    continue
+                continue
 
-                vph = calculate_vph(metrics["view_count"], pub_dt, reference_time=now_utc)
-                median_factor = calculate_median_factor(vph, median_vph)
-                duration = metrics["duration_seconds"]
-                engagement_ratio = calculate_engagement_ratio(
-                    metrics["view_count"],
-                    metrics["like_count"],
-                    metrics["comment_count"]
+            vph = calculate_vph(metrics["view_count"], pub_dt, reference_time=now_utc)
+            median_factor = calculate_median_factor(vph, median_vph)
+            duration = metrics["duration_seconds"]
+            engagement_ratio = calculate_engagement_ratio(
+                metrics["view_count"],
+                metrics["like_count"],
+                metrics["comment_count"]
+            )
+
+            # 3. Gatilhos de Decisão
+            # Condição 1: Duração mínima (ignora Shorts e vídeos curtos)
+            is_long_enough = duration >= min_duration
+            # Condição 2: Hype (VPH alto ou multiplicador acima da mediana)
+            is_viral = (vph >= vph_threshold) or (median_factor >= multiplier_threshold)
+
+            if is_long_enough and is_viral:
+                logger.info(
+                    f"🔥 VÍDEO VIRAL QUALIFICADO: '{metrics['title']}' (VPH: {vph}, Fator: {median_factor}x, Engajamento: {engagement_ratio}%, Duração: {duration // 60}m)",
+                    extra={"event": "video_qualified", "youtube_id": yt_id, "vph": vph, "factor": median_factor, "engagement": engagement_ratio}
                 )
-
-                # 3. Gatilhos de Decisão
-                # Condição 1: Duração mínima (ignora Shorts e vídeos curtos)
-                is_long_enough = duration >= min_duration
-                # Condição 2: Hype (VPH alto ou multiplicador acima da mediana)
-                is_viral = (vph >= vph_threshold) or (median_factor >= multiplier_threshold)
-
-                if is_long_enough and is_viral:
-                    logger.info(
-                        f"🔥 VÍDEO VIRAL QUALIFICADO: '{metrics['title']}' (VPH: {vph}, Fator: {median_factor}x, Engajamento: {engagement_ratio}%, Duração: {duration // 60}m)",
-                        extra={"event": "video_qualified", "youtube_id": yt_id, "vph": vph, "factor": median_factor, "engagement": engagement_ratio}
-                    )
-                    cursor.execute("""
+                with get_db() as conn:
+                    conn.cursor().execute("""
                         INSERT INTO radar_candidates (
                             source_channel_id, youtube_id, title, published_at, duration_seconds,
                             view_count, like_count, comment_count, vph, median_factor,
@@ -217,40 +241,42 @@ def run_radar_cycle(dry_run: bool = False) -> int:
                           metrics["view_count"], metrics["like_count"], metrics["comment_count"],
                           vph, median_factor))
 
-                    # 4. Ação: Download seletivo e Extração de Inteligência
-                    if not dry_run:
-                        if downloads_count < settings.MAX_DOWNLOADS_PER_CYCLE:
-                            downloaded_path = download_youtube_video(yt_id)
-                            if downloaded_path and downloaded_path.exists():
-                                # Salva heatmap e capítulos no arquivo companion .meta.json
-                                try:
-                                    meta_info = extract_video_heatmap_and_chapters(yt_id)
-                                    meta_info["engagement_ratio"] = engagement_ratio
-                                    meta_info["vph"] = vph
-                                    meta_info["title"] = metrics["title"]
-                                    meta_file = downloaded_path.with_suffix(".meta.json")
-                                    with open(meta_file, "w", encoding="utf-8") as f_meta:
-                                        json.dump(meta_info, f_meta, indent=2, ensure_ascii=False)
-                                    logger.info(f"Metadados de retenção/heatmap salvos em {meta_file.name}")
-                                except Exception as e_meta:
-                                    logger.warning(f"Falha ao salvar meta.json para {yt_id}: {e_meta}")
+                # 4. Ação: Download seletivo e Extração de Inteligência
+                if not dry_run:
+                    if downloads_count < settings.MAX_DOWNLOADS_PER_CYCLE:
+                        downloaded_path = download_youtube_video(yt_id)
+                        if downloaded_path and downloaded_path.exists():
+                            # Salva heatmap e capítulos no arquivo companion .meta.json
+                            try:
+                                meta_info = extract_video_heatmap_and_chapters(yt_id)
+                                meta_info["engagement_ratio"] = engagement_ratio
+                                meta_info["vph"] = vph
+                                meta_info["title"] = metrics["title"]
+                                meta_file = downloaded_path.with_suffix(".meta.json")
+                                with open(meta_file, "w", encoding="utf-8") as f_meta:
+                                    json.dump(meta_info, f_meta, indent=2, ensure_ascii=False)
+                                logger.info(f"Metadados de retenção/heatmap salvos em {meta_file.name}")
+                            except Exception as e_meta:
+                                logger.warning(f"Falha ao salvar meta.json para {yt_id}: {e_meta}")
 
-                                cursor.execute("""
+                            with get_db() as conn:
+                                conn.cursor().execute("""
                                     UPDATE radar_candidates
                                     SET status = 'DOWNLOADED', downloaded_at = datetime('now')
                                     WHERE youtube_id = ?;
                                 """, (yt_id,))
-                                downloads_count += 1
-                        else:
-                            logger.info(f"Limite de downloads por ciclo atingido ({settings.MAX_DOWNLOADS_PER_CYCLE}).")
-                else:
-                    reject_reason = []
-                    if not is_long_enough:
-                        reject_reason.append(f"Duração insuficiente ({duration // 60}m < {min_duration // 60}m)")
-                    if not is_viral:
-                        reject_reason.append(f"Abaixo do threshold de hype (VPH: {vph} < {vph_threshold})")
+                            downloads_count += 1
+                    else:
+                        logger.info(f"Limite de downloads por ciclo atingido ({settings.MAX_DOWNLOADS_PER_CYCLE}).")
+            else:
+                reject_reason = []
+                if not is_long_enough:
+                    reject_reason.append(f"Duração insuficiente ({duration // 60}m < {min_duration // 60}m)")
+                if not is_viral:
+                    reject_reason.append(f"Abaixo do threshold de hype (VPH: {vph} < {vph_threshold})")
 
-                    cursor.execute("""
+                with get_db() as conn:
+                    conn.cursor().execute("""
                         INSERT INTO radar_candidates (
                             source_channel_id, youtube_id, title, published_at, duration_seconds,
                             view_count, vph, median_factor, status, reject_reason, last_checked_at
@@ -263,7 +289,9 @@ def run_radar_cycle(dry_run: bool = False) -> int:
                     """, (channel_id, yt_id, metrics["title"], pub_dt.isoformat(), duration,
                           metrics["view_count"], vph, median_factor, "; ".join(reject_reason)))
 
-    record_heartbeat("radar_youtube", "OK", f"Ciclo finalizado. Downloads: {downloads_count}")
+    msg_finish = f"Ciclo finalizado. Vídeos baixados para corte: {downloads_count}"
+    record_heartbeat("radar_youtube", "OK", msg_finish)
+    SignalTracker.emit_finish("radar_youtube", msg_finish, success=True, metadata={"downloads": downloads_count})
     return downloads_count
 
 def main():

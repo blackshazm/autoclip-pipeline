@@ -42,6 +42,9 @@ def main():
         p_dash = start_worker("src.dashboard", "dashboard.log")
         processes.append(("Painel Web", "src.dashboard", "dashboard.log", p_dash))
 
+        p_watchdog = start_worker("src.services.watchdog", "watchdog.log")
+        processes.append(("Watchdog Guardiao", "src.services.watchdog", "watchdog.log", p_watchdog))
+
         print("")
         print("[OK] Todos os modulos da pipeline estao em execucao continua!")
         print("[*] Painel de Controle ativo em: http://localhost:8085")

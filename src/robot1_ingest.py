@@ -14,6 +14,7 @@ from src.core.database import get_db
 from src.services.media_validator import inspect_media_file, verify_media_integrity
 from src.services.supoclip_client import SupoclipClient
 from src.services.watchdog import record_heartbeat
+from src.core.process_signals import SignalTracker
 
 logger = get_logger("robot1_ingest")
 
@@ -120,6 +121,7 @@ def process_single_video(video_path: Path, client: SupoclipClient) -> bool:
 
         # Envia para Supoclip
         try:
+            SignalTracker.emit_progress("robot1_ingest", 2, 3, f"Enviando '{file_name}' para o Supoclip...")
             job_id = client.submit_job(video_path)
             cursor.execute("UPDATE long_videos SET supoclip_job_id = ? WHERE id = ?;", (job_id, long_video_id))
             cursor.execute("""
@@ -127,6 +129,7 @@ def process_single_video(video_path: Path, client: SupoclipClient) -> bool:
                 VALUES (?, ?, 'SUBMITTED', datetime('now'));
             """, (long_video_id, job_id))
 
+            SignalTracker.emit_progress("robot1_ingest", 3, 3, f"Job despachado para Supoclip: ID {job_id}")
             logger.info(
                 f"Vídeo '{file_name}' despachado com sucesso para o Supoclip (Job ID: {job_id})",
                 extra={"event": "ingest_submitted", "long_video_id": long_video_id, "job_id": job_id}
@@ -136,6 +139,7 @@ def process_single_video(video_path: Path, client: SupoclipClient) -> bool:
         except Exception as e:
             logger.error(f"Falha ao enviar vídeo para Supoclip: {e}", exc_info=True)
             cursor.execute("UPDATE long_videos SET status = 'FAILED', error_message = ? WHERE id = ?;", (str(e), long_video_id))
+            SignalTracker.emit_finish("robot1_ingest", f"Falha no envio para Supoclip: {e}", success=False)
             return False
 
 def run_ingestor_cycle() -> int:
@@ -148,13 +152,26 @@ def run_ingestor_cycle() -> int:
     processed_count = 0
 
     video_files = [f for f in watch_dir.iterdir() if f.is_file() and f.suffix.lower() in (".mp4", ".mkv", ".mov")]
-    for vf in video_files:
+    total_files = len(video_files)
+
+    if total_files > 0:
+        SignalTracker.emit_start(
+            "robot1_ingest",
+            "Ingestão de Vídeos",
+            total_steps=total_files,
+            message=f"{total_files} arquivo(s) detectado(s) na pasta de entrada"
+        )
+
+    for idx, vf in enumerate(video_files, 1):
         if vf.name.startswith("."):
             continue
+        SignalTracker.emit_progress("robot1_ingest", idx, total_files, f"Processando vídeo {idx}/{total_files}: {vf.name}")
         if process_single_video(vf, client):
             processed_count += 1
 
-    record_heartbeat("robot1_ingest", "OK", f"Varredura concluída. Ingeridos: {processed_count}")
+    msg_finish = f"Varredura concluída. Novos vídeos ingeridos: {processed_count}"
+    record_heartbeat("robot1_ingest", "OK", msg_finish)
+    SignalTracker.emit_finish("robot1_ingest", msg_finish, success=True, metadata={"ingested": processed_count})
     return processed_count
 
 def main():

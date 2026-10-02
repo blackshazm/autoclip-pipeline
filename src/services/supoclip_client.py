@@ -172,6 +172,25 @@ class SupoclipClient:
                     if virality == 0:
                         virality = 80
 
+                    # Extrai dados de série se disponíveis
+                    series_id = c.get("series_id")
+                    try:
+                        part_number = int(c.get("part_number") or 1)
+                    except (ValueError, TypeError):
+                        part_number = 1
+                    try:
+                        total_parts = int(c.get("total_parts") or 1)
+                    except (ValueError, TypeError):
+                        total_parts = 1
+
+                    hook_title = c.get("hook_title") or ""
+                    if not series_id and hook_title:
+                        p_match = re.search(r'\[Parte\s*(\d+)/(\d+)\]', hook_title, re.IGNORECASE)
+                        if p_match:
+                            series_id = f"series-{job_id}"
+                            part_number = int(p_match.group(1))
+                            total_parts = int(p_match.group(2))
+
                     clips.append({
                         "clip_uid": clip_id,
                         "file_path": str(local_clip_path),
@@ -184,7 +203,11 @@ class SupoclipClient:
                         "height": 1920,
                         "fps": 30.0,
                         "subtitle_mode": "burned",
-                        "crop_mode": "face_center"
+                        "crop_mode": "face_center",
+                        "series_id": series_id,
+                        "part_number": part_number,
+                        "total_parts": total_parts,
+                        "hook_title": hook_title,
                     })
 
                 return {

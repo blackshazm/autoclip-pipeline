@@ -38,11 +38,25 @@ data/*.db-shm
 
 # Config & Credentials
 .env
+.env.*
+!.env.example
 client_secret*.json
 *.oauth
 config/cookies.txt
 config/client_secrets.json
 config/youtube_token.json
+config/tiktok_token.json
+config/*_state.json
+
+# Browser Profiles & Authentication Sessions (Playwright/Chrome)
+data/*_browser_profile/
+data/tiktok_browser_profile/
+data/youtube_browser_profile/
+
+# Scratch & Temporary Debug Artifacts
+scratch/
+*.jfif
+=
 
 # Logs
 logs/

@@ -25,15 +25,36 @@ class TikTokPublisher:
         clip_uid: str
     ) -> Dict[str, Any]:
         """
-        Publica vídeo vertical no TikTok via Content Posting API oficial ou simulação isolada.
+        Publica vídeo vertical no TikTok via Content Posting API oficial, automação de navegador (Playwright) ou simulação isolada.
         """
         if not video_path.exists():
             raise TikTokPublishError(f"Arquivo não encontrado: {video_path}")
 
-        # Se token não configurado, opera em modo simulado/skip seguro
+        # 1. Modo Navegador (Playwright com cookies / perfil persistente)
+        state_file = Path("config/tiktok_state.json")
+        user_data_dir = Path("data/tiktok_browser_profile")
+        
+        if self.mode in ("browser", "cookie") or (not self.access_token and (state_file.exists() or user_data_dir.exists())):
+            logger.info(f"Iniciando publicação no TikTok via Automação de Navegador para {clip_uid}...")
+            try:
+                from scripts.tiktok_browser_upload import upload_tiktok_video
+                success = upload_tiktok_video(video_path=video_path, title=title, tags=tags, headless=False)
+                if success:
+                    return {
+                        "tiktok_post_id": f"browser_{clip_uid[:12]}",
+                        "status": "POSTED",
+                        "mode": "browser"
+                    }
+                else:
+                    raise TikTokPublishError("Falha na automação de upload pelo navegador do TikTok.")
+            except Exception as e:
+                logger.error(f"Erro no upload via navegador: {e}")
+                raise TikTokPublishError(f"Erro na publicação via navegador: {e}")
+
+        # 2. Se token não configurado e sem cookies de navegador, opera em modo simulado
         if not self.access_token:
             logger.warning(
-                f"[SIMULAÇÃO] Token do TikTok não configurado. Simulando envio para {clip_uid}.",
+                f"[SIMULAÇÃO] Token ou Sessão do TikTok não configurados. Simulando envio para {clip_uid}.",
                 extra={"event": "tiktok_mock_publish", "clip_uid": clip_uid}
             )
             return {

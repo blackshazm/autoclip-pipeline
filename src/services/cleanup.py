@@ -100,10 +100,22 @@ def run_disk_cleanup() -> Dict[str, Any]:
             if p.exists():
                 size = p.stat().st_size
                 try:
+                    # Remove arquivo de vídeo
                     p.unlink()
                     freed_bytes += size
                     deleted_clips += 1
-                    logger.info(f"Clip publicado purgado pós-retenção de 48h: {p.name}", extra={"event": "purge_posted_clip", "clip_id": row["id"]})
+                    logger.info(
+                        f"Clip publicado purgado pós-retenção de {settings.KEEP_POSTED_CLIPS_HOURS}h: {p.name}",
+                        extra={"event": "purge_posted_clip", "clip_id": row["id"]}
+                    )
+                    # Remove arquivo de transcrição correspondente se existir
+                    for txt_candidate in (p.with_suffix(".txt"), p.parent / f"{p.stem}_transcript.txt"):
+                        if txt_candidate.exists():
+                            try:
+                                freed_bytes += txt_candidate.stat().st_size
+                                txt_candidate.unlink()
+                            except Exception:
+                                pass
                 except Exception as e:
                     logger.error(f"Erro ao remover clip publicado {p}: {e}")
             cursor.execute("UPDATE clips SET is_deleted_from_disk = 1 WHERE id = ?;", (row["id"],))
