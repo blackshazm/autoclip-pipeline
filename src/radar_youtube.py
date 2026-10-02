@@ -77,7 +77,7 @@ def fetch_channel_feed(rss_url: str, channel_ref: Optional[str] = None) -> List[
                 sys.executable, "-m", "yt_dlp",
                 "--flat-playlist",
                 "--dump-single-json",
-                "--playlist-items", "1:10",
+                "--playlist-items", "1:20",
                 "--no-warnings",
                 channel_url
             ]
@@ -178,30 +178,30 @@ def run_radar_cycle(dry_run: bool = False) -> int:
             # 2. Coleta métricas analíticas
             metrics = fetch_video_metrics(yt_id)
             if not metrics:
-                continue
+                # Fallback resiliente: cria métricas sintéticas a partir do feed RSS para não interromper a esteira
+                metrics = {
+                    "youtube_id": yt_id,
+                    "title": entry.get("title", f"Vídeo {yt_id}"),
+                    "published_at": datetime.now(timezone.utc),
+                    "duration_seconds": 300,
+                    "view_count": 0,
+                    "like_count": 0,
+                    "comment_count": 0,
+                    "source": "rss_fallback"
+                }
 
             pub_dt = metrics["published_at"]
             now_utc = datetime.now(timezone.utc)
             age_hours = (now_utc - pub_dt).total_seconds() / 3600.0
 
-            # Regra de amostragem temporal: ignora temporariamente vídeos com menos de 2h
-            if age_hours < settings.RADAR_MIN_AGE_HOURS:
+            # Regra de amostragem temporal: ignora vídeos com menos de 2h apenas se os filtros de hype estiverem ativos
+            if not settings.RADAR_DISABLE_HYPE_FILTERS and age_hours < settings.RADAR_MIN_AGE_HOURS:
                 logger.debug(f"Vídeo {yt_id} muito recente ({age_hours:.1f}h). Aguardando maturação de métricas.")
                 with get_db() as conn:
                     conn.cursor().execute("""
                         INSERT INTO radar_candidates (source_channel_id, youtube_id, title, published_at, status, last_checked_at)
                         VALUES (?, ?, ?, ?, 'MONITORING', datetime('now'))
                         ON CONFLICT(youtube_id) DO UPDATE SET last_checked_at = datetime('now');
-                    """, (channel_id, yt_id, metrics["title"], pub_dt.isoformat()))
-                continue
-
-            # Ignora vídeos excessivamente antigos (> 48h)
-            if age_hours > settings.RADAR_MAX_AGE_HOURS:
-                with get_db() as conn:
-                    conn.cursor().execute("""
-                        INSERT INTO radar_candidates (source_channel_id, youtube_id, title, published_at, status, reject_reason)
-                        VALUES (?, ?, ?, ?, 'REJECTED', 'Vídeo com idade acima de 48h')
-                        ON CONFLICT(youtube_id) DO UPDATE SET status = 'REJECTED', reject_reason = 'Idade > 48h';
                     """, (channel_id, yt_id, metrics["title"], pub_dt.isoformat()))
                 continue
 
@@ -214,15 +214,39 @@ def run_radar_cycle(dry_run: bool = False) -> int:
                 metrics["comment_count"]
             )
 
+            # Vídeos excessivamente antigos (> 7 dias) são descartados se os filtros estiverem ativos
+            max_cutoff_hours = settings.RADAR_IGNORE_AFTER_DAYS * 24.0
+            if not settings.RADAR_DISABLE_HYPE_FILTERS and age_hours > max_cutoff_hours:
+                with get_db() as conn:
+                    conn.cursor().execute("""
+                        INSERT INTO radar_candidates (source_channel_id, youtube_id, title, published_at, status, reject_reason)
+                        VALUES (?, ?, ?, ?, 'REJECTED', 'Vídeo com idade acima de 7 dias')
+                        ON CONFLICT(youtube_id) DO UPDATE SET status = 'REJECTED', reject_reason = 'Idade > 7d';
+                    """, (channel_id, yt_id, metrics["title"], pub_dt.isoformat()))
+                continue
+
+            # Se está entre 48h e 7 dias, só filtra se os filtros estiverem ativos
+            if not settings.RADAR_DISABLE_HYPE_FILTERS and age_hours > settings.RADAR_MAX_AGE_HOURS and vph < (vph_threshold * 1.2):
+                with get_db() as conn:
+                    conn.cursor().execute("""
+                        INSERT INTO radar_candidates (source_channel_id, youtube_id, title, published_at, status, reject_reason)
+                        VALUES (?, ?, ?, ?, 'REJECTED', 'Idade > 48h sem VPH extraordinário')
+                        ON CONFLICT(youtube_id) DO UPDATE SET status = 'REJECTED', reject_reason = 'Idade > 48h';
+                    """, (channel_id, yt_id, metrics["title"], pub_dt.isoformat()))
+                continue
+
             # 3. Gatilhos de Decisão
-            # Condição 1: Duração mínima (ignora Shorts e vídeos curtos)
-            is_long_enough = duration >= min_duration
-            # Condição 2: Hype (VPH alto ou multiplicador acima da mediana)
-            is_viral = (vph >= vph_threshold) or (median_factor >= multiplier_threshold)
+            if settings.RADAR_DISABLE_HYPE_FILTERS:
+                # Sem filtros de hype: aceita qualquer vídeo desde que não seja um Short (< 60s)
+                is_long_enough = duration >= min(min_duration, 60)
+                is_viral = True
+            else:
+                is_long_enough = duration >= min_duration
+                is_viral = (vph >= vph_threshold) or (median_factor >= multiplier_threshold)
 
             if is_long_enough and is_viral:
                 logger.info(
-                    f"🔥 VÍDEO VIRAL QUALIFICADO: '{metrics['title']}' (VPH: {vph}, Fator: {median_factor}x, Engajamento: {engagement_ratio}%, Duração: {duration // 60}m)",
+                    f"🎬 VÍDEO QUALIFICADO PARA CORTE: '{metrics['title']}' (Duração: {duration // 60}m, VPH: {vph}, Modo Sem Filtros={settings.RADAR_DISABLE_HYPE_FILTERS})",
                     extra={"event": "video_qualified", "youtube_id": yt_id, "vph": vph, "factor": median_factor, "engagement": engagement_ratio}
                 )
                 with get_db() as conn:

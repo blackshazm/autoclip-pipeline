@@ -36,11 +36,12 @@ class Settings(BaseSettings):
     CLIP_MIN_DURATION_SECONDS: int = Field(default=50)
     CLIP_MAX_DURATION_SECONDS: int = Field(default=75)
 
-    # Limiares de Qualidade e Radar
-    MIN_VIRALITY_SCORE: int = Field(default=60)
-    VPH_MINIMUM_THRESHOLD: int = Field(default=5000)
+    # Limiares de Qualidade e Radar (Filtros desativados para aceitar novos vídeos sem exigir alto VPH)
+    RADAR_DISABLE_HYPE_FILTERS: bool = Field(default=True)
+    MIN_VIRALITY_SCORE: int = Field(default=0)
+    VPH_MINIMUM_THRESHOLD: int = Field(default=0)
     RADAR_INTERVAL_MINUTES: int = Field(default=15)
-    RADAR_MIN_AGE_HOURS: int = Field(default=2)
+    RADAR_MIN_AGE_HOURS: int = Field(default=0)
     RADAR_MAX_AGE_HOURS: int = Field(default=48)
     RADAR_IGNORE_AFTER_DAYS: int = Field(default=7)
     MAX_DOWNLOADS_PER_CYCLE: int = Field(default=15)
@@ -49,6 +50,7 @@ class Settings(BaseSettings):
     # Agendamento e Buffer Anti-Spam
     TIMEZONE: str = Field(default="America/Sao_Paulo")
     POST_INTERVAL_MINUTES: int = Field(default=90)
+    MIN_SAME_VIDEO_INTERVAL_MINUTES: int = Field(default=120)
     DEFAULT_POSTING_WINDOWS: List[str] = Field(
         default=["09:00", "11:30", "13:30", "15:30", "17:30", "19:30", "21:30"]
     )

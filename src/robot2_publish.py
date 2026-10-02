@@ -60,11 +60,24 @@ def sync_supoclip_jobs(client: SupoclipClient) -> int:
                     extra={"event": "supoclip_job_completed", "job_id": supo_id, "clips_count": len(clips_list)}
                 )
 
+                from src.services.overlap_filter import filter_overlapping_clips
+
+                # Aplica Anti-Overlap diretamente nos clips entregues pelo Supoclip
+                for c in clips_list:
+                    c["long_video_id"] = long_video_id
+                kept_clips, discarded_clips = filter_overlapping_clips(clips_list, max_overlap_threshold=0.25)
+                discarded_uids = {d["clip_uid"]: d.get("_overlap_reason", "Sobreposição temporal detectada") for d in discarded_clips}
+
                 # Persiste os clips gerados
                 for c in clips_list:
                     clip_uid = c["clip_uid"]
                     virality_score = int(c.get("virality_score", 0))
-                    is_qualified = virality_score >= settings.MIN_VIRALITY_SCORE
+                    is_overlap = clip_uid in discarded_uids
+                    is_qualified = (virality_score >= settings.MIN_VIRALITY_SCORE) and not is_overlap
+
+                    mod_status = 'APPROVED' if is_qualified else 'MODERATION_BLOCKED'
+                    pub_status = 'PENDING' if is_qualified else ('SKIPPED_OVERLAP' if is_overlap else 'SKIPPED')
+                    err_msg = discarded_uids.get(clip_uid) if is_overlap else None
 
                     cursor.execute("""
                         INSERT INTO clips (
@@ -72,19 +85,18 @@ def sync_supoclip_jobs(client: SupoclipClient) -> int:
                             start_seconds, end_seconds, duration_seconds,
                             width, height, fps, transcription_path,
                             moderation_status, youtube_status, tiktok_status,
-                            series_id, part_number, total_parts
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            series_id, part_number, total_parts, error_log
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(clip_uid) DO NOTHING;
                     """, (
                         long_video_id, clip_uid, c["file_path"], virality_score,
                         c.get("start_seconds"), c.get("end_seconds"), c.get("duration_seconds"),
                         c.get("width"), c.get("height"), c.get("fps"), c.get("transcription_path"),
-                        'APPROVED' if is_qualified else 'MODERATION_BLOCKED',
-                        'PENDING' if is_qualified else 'SKIPPED',
-                        'PENDING' if is_qualified else 'SKIPPED',
+                        mod_status, pub_status, pub_status,
                         c.get("series_id"),
                         c.get("part_number", 1),
-                        c.get("total_parts", 1)
+                        c.get("total_parts", 1),
+                        err_msg
                     ))
 
                 # Atualiza status do job e do vídeo longo

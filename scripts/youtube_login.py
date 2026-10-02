@@ -87,7 +87,25 @@ def login_youtube():
             context.storage_state(path=str(STATE_FILE))
             print(f"✅ Arquivo de estado salvo em: {STATE_FILE}")
             print(f"✅ Diretório de perfil salvo em: {USER_DATA_DIR}")
-            print("🚀 Agora você pode usar o modo de publicação por navegador!")
+
+            # Exporta cookies no formato Netscape para o yt-dlp (downloader)
+            cookies_file = CONFIG_DIR / "cookies.txt"
+            all_cookies = context.cookies()
+            with open(cookies_file, "w", encoding="utf-8") as f_cook:
+                f_cook.write("# Netscape HTTP Cookie File\n")
+                for c in all_cookies:
+                    domain = c.get("domain", "")
+                    include_sub = "TRUE" if domain.startswith(".") else "FALSE"
+                    path = c.get("path", "/")
+                    secure = "TRUE" if c.get("secure", False) else "FALSE"
+                    expires = int(c.get("expires", -1))
+                    if expires <= 0:
+                        expires = 2147483647
+                    name = c.get("name", "")
+                    val = c.get("value", "")
+                    f_cook.write(f"{domain}\t{include_sub}\t{path}\t{secure}\t{expires}\t{name}\t{val}\n")
+            print(f"✅ Arquivo de cookies Netscape para downloads salvo em: {cookies_file}")
+            print("🚀 Agora você pode usar o modo de publicação por navegador e downloads automáticos!")
         else:
             print("\n⏰ Tempo limite esgotado sem confirmação do YouTube Studio.")
 

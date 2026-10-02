@@ -82,42 +82,50 @@ def process_single_video(video_path: Path, client: SupoclipClient) -> bool:
         existing = cursor.fetchone()
 
         if existing:
-            KNOWN_FILES_CACHE[path_key] = {"mtime": mtime, "size": size}
-            logger.info(
-                f"Vídeo '{file_name}' já cadastrado (ID {existing['id']}, Status: {existing['status']}). Ignorando duplicação.",
-                extra={"event": "ingest_duplicate_ignored", "file_hash": file_hash}
-            )
-            return False
+            if existing["status"] in ("COMPLETED", "PROCESSING"):
+                KNOWN_FILES_CACHE[path_key] = {"mtime": mtime, "size": size}
+                logger.info(
+                    f"Vídeo '{file_name}' já processado com sucesso ou em andamento (ID {existing['id']}, Status: {existing['status']}). Ignorando duplicação.",
+                    extra={"event": "ingest_duplicate_ignored", "file_hash": file_hash}
+                )
+                return False
+            else:
+                logger.info(
+                    f"Vídeo '{file_name}' com status FAILED (ID {existing['id']}). Reenviando para o Supoclip...",
+                    extra={"event": "ingest_retry_failed", "file_hash": file_hash}
+                )
+                long_video_id = existing["id"]
+                cursor.execute("UPDATE long_videos SET status = 'PROCESSING', error_message = NULL WHERE id = ?;", (long_video_id,))
+        else:
+            channel_name = None
+            source_channel_id = None
+            youtube_url = f"https://www.youtube.com/watch?v={youtube_id}" if youtube_id else None
 
-        channel_name = None
-        source_channel_id = None
-        youtube_url = f"https://www.youtube.com/watch?v={youtube_id}" if youtube_id else None
+            if youtube_id:
+                cursor.execute("""
+                    SELECT rc.source_channel_id, sc.name as channel_name
+                    FROM radar_candidates rc
+                    LEFT JOIN source_channels sc ON rc.source_channel_id = sc.id
+                    WHERE rc.youtube_id = ?;
+                """, (youtube_id,))
+                cand_info = cursor.fetchone()
+                if cand_info:
+                    source_channel_id = cand_info["source_channel_id"]
+                    channel_name = cand_info["channel_name"]
 
-        if youtube_id:
+            # Registra novo vídeo em long_videos com status PROCESSING
             cursor.execute("""
-                SELECT rc.source_channel_id, sc.name as channel_name
-                FROM radar_candidates rc
-                LEFT JOIN source_channels sc ON rc.source_channel_id = sc.id
-                WHERE rc.youtube_id = ?;
-            """, (youtube_id,))
-            cand_info = cursor.fetchone()
-            if cand_info:
-                source_channel_id = cand_info["source_channel_id"]
-                channel_name = cand_info["channel_name"]
-
-        # Registra novo vídeo em long_videos com status PENDING / PROCESSING
-        cursor.execute("""
-            INSERT INTO long_videos (
+                INSERT INTO long_videos (
+                    file_hash, youtube_id, channel_name, source_channel_id,
+                    file_name, file_path, youtube_url,
+                    duration_seconds, file_size_bytes, media_valid, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'PROCESSING');
+            """, (
                 file_hash, youtube_id, channel_name, source_channel_id,
-                file_name, file_path, youtube_url,
-                duration_seconds, file_size_bytes, media_valid, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'PROCESSING');
-        """, (
-            file_hash, youtube_id, channel_name, source_channel_id,
-            file_name, str(video_path.resolve()), youtube_url,
-            int(media_info["duration_seconds"]), media_info["file_size_bytes"]
-        ))
-        long_video_id = cursor.lastrowid
+                file_name, str(video_path.resolve()), youtube_url,
+                int(media_info["duration_seconds"]), media_info["file_size_bytes"]
+            ))
+            long_video_id = cursor.lastrowid
 
         # Envia para Supoclip
         try:
@@ -151,7 +159,16 @@ def run_ingestor_cycle() -> int:
     client = SupoclipClient()
     processed_count = 0
 
-    video_files = [f for f in watch_dir.iterdir() if f.is_file() and f.suffix.lower() in (".mp4", ".mkv", ".mov")]
+    # Filtra arquivos reais de video, ignorando fragmentos temporários de download (.temp, .part, etc.)
+    video_files = [
+        f for f in watch_dir.iterdir() 
+        if f.is_file() 
+        and f.suffix.lower() in (".mp4", ".mkv", ".mov")
+        and not f.name.startswith(".")
+        and ".temp." not in f.name.lower()
+        and ".part" not in f.name.lower()
+        and not f.name.lower().endswith(".temp.mp4")
+    ]
     total_files = len(video_files)
 
     if total_files > 0:
@@ -163,8 +180,6 @@ def run_ingestor_cycle() -> int:
         )
 
     for idx, vf in enumerate(video_files, 1):
-        if vf.name.startswith("."):
-            continue
         SignalTracker.emit_progress("robot1_ingest", idx, total_files, f"Processando vídeo {idx}/{total_files}: {vf.name}")
         if process_single_video(vf, client):
             processed_count += 1

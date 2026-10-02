@@ -163,3 +163,72 @@ def round_robin_interleave(
 
     return result
 
+def filter_against_database(
+    clips: List[Dict[str, Any]], 
+    conn: Optional[Any] = None, 
+    max_overlap_threshold: float = 0.25
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Filtra clips candidatos comparando contra cortes JÁ EXISTENTES no banco de dados
+    para o mesmo long_video_id que foram aprovados ou agendados/postados.
+    Evita duplicação temporal histórica entre lotes diferentes.
+    """
+    from src.core.database import get_db
+
+    kept: List[Dict[str, Any]] = []
+    discarded: List[Dict[str, Any]] = []
+
+    def check_with_connection(c):
+        cursor = c.cursor()
+        for cand in clips:
+            v_id = cand.get("long_video_id")
+            c_id = cand.get("id")
+            c_start = parse_seconds(cand.get("start_seconds"))
+            c_end = parse_seconds(cand.get("end_seconds"))
+
+            if not v_id or c_end <= c_start:
+                kept.append(cand)
+                continue
+
+            query = """
+                SELECT id, clip_uid, start_seconds, end_seconds, virality_score, title
+                FROM clips
+                WHERE long_video_id = ? 
+                  AND moderation_status = 'APPROVED'
+                  AND (youtube_status IN ('PENDING', 'SCHEDULED', 'POSTED') OR tiktok_status IN ('PENDING', 'SCHEDULED', 'POSTED'))
+            """
+            params = [v_id]
+            if c_id:
+                query += " AND id != ?"
+                params.append(c_id)
+
+            cursor.execute(query, tuple(params))
+            existing_clips = cursor.fetchall()
+
+            has_overlap = False
+            for ex in existing_clips:
+                ex_start = parse_seconds(ex["start_seconds"])
+                ex_end = parse_seconds(ex["end_seconds"])
+                if ex_end <= ex_start:
+                    continue
+
+                overlap = calculate_overlap_ratio(c_start, c_end, ex_start, ex_end)
+                if overlap > max_overlap_threshold:
+                    has_overlap = True
+                    ex_dict = dict(ex)
+                    ex_ref = ex_dict.get('title') or ex_dict.get('clip_uid')
+                    cand["_overlap_reason"] = f"Sobreposição de {int(overlap * 100)}% com corte histórico existente ID {ex_dict.get('id')} ({ex_ref})"
+                    discarded.append(cand)
+                    break
+
+            if not has_overlap:
+                kept.append(cand)
+
+    if conn is not None:
+        check_with_connection(conn)
+    else:
+        with get_db() as local_conn:
+            check_with_connection(local_conn)
+
+    return kept, discarded
+

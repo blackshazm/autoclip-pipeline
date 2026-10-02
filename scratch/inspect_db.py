@@ -1,40 +1,50 @@
-import sys
-import io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-
 import sqlite3
-import os
 import json
 
-db_path = r"d:\Downloads\haker00\You1\data\pipeline.db"
-print("=== VERIFICANDO BANCO DE DADOS:", db_path)
-
-if not os.path.exists(db_path):
-    print("Banco de dados nao encontrado.")
-    exit(0)
-
-conn = sqlite3.connect(db_path)
+conn = sqlite3.connect('data/pipeline.db')
 conn.row_factory = sqlite3.Row
 cur = conn.cursor()
 
-tables = [t[0] for t in cur.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()]
-print(f"Tabelas encontradas ({len(tables)}): {tables}\n")
+print('=== TOTAL DE TABELAS ===')
+cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+print([r[0] for r in cur.fetchall()])
 
-for t in tables:
-    count = cur.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-    print(f"[*] Tabela '{t}': {count} registros")
-    cols = [col[1] for col in cur.execute(f"PRAGMA table_info({t})").fetchall()]
-    print(f"    Colunas: {cols}")
-    if count > 0:
-        rows = cur.execute(f"SELECT * FROM {t} ORDER BY rowid DESC LIMIT 5").fetchall()
-        for i, r in enumerate(rows):
-            d = dict(r)
-            # Truncate large texts for readability
-            for k, v in d.items():
-                if isinstance(v, str) and len(v) > 80:
-                    d[k] = v[:80] + "..."
-            print(f"    Registro {i+1}: {d}")
-    print()
+print('\n=== RADAR CANDIDATES ===')
+try:
+    cur.execute("SELECT count(*), status FROM radar_candidates GROUP BY status;")
+    print([dict(r) for r in cur.fetchall()])
+except Exception as e:
+    print('radar_candidates err:', e)
 
-conn.close()
+print('\n=== LONG VIDEOS ===')
+try:
+    cur.execute("SELECT id, youtube_id, file_name, status, duration_seconds FROM long_videos;")
+    print([dict(r) for r in cur.fetchall()])
+except Exception as e:
+    print('long_videos err:', e)
+
+print('\n=== CLIPS (Amostra e colunas start/end) ===')
+try:
+    cur.execute("SELECT id, long_video_id, clip_uid, virality_score, start_seconds, end_seconds, duration_seconds, youtube_status, title FROM clips LIMIT 15;")
+    for r in cur.fetchall():
+        print(dict(r))
+except Exception as e:
+    print('clips err:', e)
+
+print('\n=== CLIPS TOTAL COUNT & DUPLICATES ===')
+try:
+    cur.execute("SELECT count(*) as total, count(distinct long_video_id) as total_long_videos FROM clips;")
+    print([dict(r) for r in cur.fetchall()])
+    cur.execute("SELECT long_video_id, count(*) as count, GROUP_CONCAT(start_seconds) as starts, GROUP_CONCAT(end_seconds) as ends, GROUP_CONCAT(title) as titles FROM clips GROUP BY long_video_id;")
+    for r in cur.fetchall():
+        print(dict(r))
+except Exception as e:
+    print('clips dup err:', e)
+
+print('\n=== PUBLICATIONS ===')
+try:
+    cur.execute("SELECT id, clip_id, platform, status, scheduled_for, external_id FROM publications LIMIT 20;")
+    for r in cur.fetchall():
+        print(dict(r))
+except Exception as e:
+    print('publications err:', e)
