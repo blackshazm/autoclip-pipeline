@@ -12,7 +12,7 @@ import json
 
 from src.core.config import settings
 from src.core.logger import get_logger
-from src.core.database import get_db
+from src.core.database import get_db, _execute_with_retry
 from src.services.youtube_metrics import (
     calculate_vph,
     calculate_median_factor,
@@ -23,6 +23,7 @@ from src.services.youtube_metrics import (
 from src.services.downloader import download_youtube_video
 from src.services.watchdog import record_heartbeat
 from src.core.process_signals import SignalTracker
+from src.core.pipeline_control import PipelineController
 
 logger = get_logger("radar_youtube")
 
@@ -101,8 +102,96 @@ def fetch_channel_feed(rss_url: str, channel_ref: Optional[str] = None) -> List[
 
     return []
 
+def process_candidate_download(yt_id: str, title: str = "", vph: int = 0, engagement_ratio: float = 0.0) -> bool:
+    """Baixa o vídeo de um candidato qualificado, extrai metadados/heatmap e atualiza o banco de dados."""
+    downloaded_path = download_youtube_video(yt_id)
+    if downloaded_path and downloaded_path.exists():
+        try:
+            meta_info = extract_video_heatmap_and_chapters(yt_id)
+            meta_info["engagement_ratio"] = engagement_ratio
+            meta_info["vph"] = vph
+            meta_info["title"] = title or f"Vídeo {yt_id}"
+            meta_file = downloaded_path.with_suffix(".meta.json")
+            with open(meta_file, "w", encoding="utf-8") as f_meta:
+                json.dump(meta_info, f_meta, indent=2, ensure_ascii=False)
+            logger.info(f"Metadados de retenção/heatmap salvos em {meta_file.name}")
+        except Exception as e_meta:
+            logger.warning(f"Falha ao salvar meta.json para {yt_id}: {e_meta}")
+
+        def _update_downloaded(yid=yt_id):
+            with get_db() as conn:
+                conn.cursor().execute("""
+                    UPDATE radar_candidates
+                    SET status = 'DOWNLOADED', downloaded_at = datetime('now')
+                    WHERE youtube_id = ?;
+                """, (yid,))
+        _execute_with_retry(_update_downloaded, label=f"radar_update_downloaded_{yt_id}")
+        return True
+    else:
+        logger.warning(f"Download falhou para candidato {yt_id}. Marcando como ERROR para liberar ciclo.")
+        def _update_error(yid=yt_id):
+            with get_db() as conn:
+                conn.cursor().execute("""
+                    UPDATE radar_candidates
+                    SET status = 'ERROR', reject_reason = 'Falha no download via yt-dlp'
+                    WHERE youtube_id = ?;
+                """, (yid,))
+        _execute_with_retry(_update_error, label=f"radar_update_error_{yt_id}")
+        return False
+
+
+def download_pending_qualified_candidates(downloads_count: int = 0, max_downloads: int = 5, dry_run: bool = False) -> int:
+    """
+    Busca vídeos já qualificados no banco que ainda não foram baixados, garantindo fluxo contínuo
+    mesmo que os vídeos tenham saído do topo do feed RSS recente.
+    """
+    if dry_run or downloads_count >= max_downloads:
+        return downloads_count
+
+    remaining_slots = max_downloads - downloads_count
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT rc.youtube_id, rc.title, rc.vph, sc.niche, sc.name as channel_name
+            FROM radar_candidates rc
+            JOIN source_channels sc ON rc.source_channel_id = sc.id
+            WHERE rc.status = 'QUALIFIED'
+              AND (rc.downloaded_at IS NULL OR rc.downloaded_at = '')
+              AND rc.youtube_id NOT IN (SELECT youtube_id FROM long_videos WHERE youtube_id IS NOT NULL)
+            ORDER BY rc.id DESC
+            LIMIT ?;
+        """, (remaining_slots,))
+        pending = [dict(r) for r in cursor.fetchall()]
+
+    if not pending:
+        return downloads_count
+
+    logger.info(f"Fila ativa do Radar: {len(pending)} candidatos qualificados pendentes para download.")
+
+    for cand in pending:
+        yt_id = cand["youtube_id"]
+        logger.info(f"Baixando candidato qualificado da fila: {yt_id} ({cand.get('channel_name')} - {cand.get('niche')})")
+        if process_candidate_download(yt_id, title=cand.get("title", ""), vph=cand.get("vph", 0)):
+            downloads_count += 1
+            time.sleep(5.0)
+        else:
+            time.sleep(2.0)
+
+        if downloads_count >= max_downloads:
+            break
+
+    return downloads_count
+
+
 def run_radar_cycle(dry_run: bool = False) -> int:
     """Executa um ciclo completo de varredura nos canais monitorados."""
+    if PipelineController.is_paused("radar_youtube"):
+        msg = "⏸️ Radar de Hype pausado pelo usuário. Em espera..."
+        record_heartbeat("radar_youtube", "PAUSED", msg)
+        SignalTracker.emit_progress("radar_youtube", 0, 1, msg)
+        logger.info(msg)
+        return 0
+
     record_heartbeat("radar_youtube", "RUNNING", f"Ciclo iniciado (dry_run={dry_run})")
     downloads_count = 0
 
@@ -164,16 +253,14 @@ def run_radar_cycle(dry_run: bool = False) -> int:
                 # Se já está QUALIFICADO mas ainda não foi baixado, realiza o download
                 if cand_status == "QUALIFIED" and not existing_candidate.get("downloaded_at"):
                     if not dry_run and downloads_count < settings.MAX_DOWNLOADS_PER_CYCLE:
-                        downloaded_path = download_youtube_video(yt_id)
-                        if downloaded_path and downloaded_path.exists():
-                            with get_db() as conn:
-                                conn.cursor().execute("""
-                                    UPDATE radar_candidates
-                                    SET status = 'DOWNLOADED', downloaded_at = datetime('now')
-                                    WHERE youtube_id = ?;
-                                """, (yt_id,))
+                        if process_candidate_download(yt_id, title=existing_candidate.get("title", ""), vph=existing_candidate.get("vph", 0)):
                             downloads_count += 1
+                            time.sleep(5.0)
+                        else:
+                            time.sleep(2.0)
                     continue
+
+
 
             # 2. Coleta métricas analíticas
             metrics = fetch_video_metrics(yt_id)
@@ -268,28 +355,11 @@ def run_radar_cycle(dry_run: bool = False) -> int:
                 # 4. Ação: Download seletivo e Extração de Inteligência
                 if not dry_run:
                     if downloads_count < settings.MAX_DOWNLOADS_PER_CYCLE:
-                        downloaded_path = download_youtube_video(yt_id)
-                        if downloaded_path and downloaded_path.exists():
-                            # Salva heatmap e capítulos no arquivo companion .meta.json
-                            try:
-                                meta_info = extract_video_heatmap_and_chapters(yt_id)
-                                meta_info["engagement_ratio"] = engagement_ratio
-                                meta_info["vph"] = vph
-                                meta_info["title"] = metrics["title"]
-                                meta_file = downloaded_path.with_suffix(".meta.json")
-                                with open(meta_file, "w", encoding="utf-8") as f_meta:
-                                    json.dump(meta_info, f_meta, indent=2, ensure_ascii=False)
-                                logger.info(f"Metadados de retenção/heatmap salvos em {meta_file.name}")
-                            except Exception as e_meta:
-                                logger.warning(f"Falha ao salvar meta.json para {yt_id}: {e_meta}")
-
-                            with get_db() as conn:
-                                conn.cursor().execute("""
-                                    UPDATE radar_candidates
-                                    SET status = 'DOWNLOADED', downloaded_at = datetime('now')
-                                    WHERE youtube_id = ?;
-                                """, (yt_id,))
+                        if process_candidate_download(yt_id, title=metrics["title"], vph=vph, engagement_ratio=engagement_ratio):
                             downloads_count += 1
+                            time.sleep(5.0)
+                        else:
+                            time.sleep(2.0)
                     else:
                         logger.info(f"Limite de downloads por ciclo atingido ({settings.MAX_DOWNLOADS_PER_CYCLE}).")
             else:
@@ -312,6 +382,14 @@ def run_radar_cycle(dry_run: bool = False) -> int:
                             last_checked_at = datetime('now');
                     """, (channel_id, yt_id, metrics["title"], pub_dt.isoformat(), duration,
                           metrics["view_count"], vph, median_factor, "; ".join(reject_reason)))
+
+    # 5. Processa candidatos qualificados pendentes no banco (fila contínua de Finanças/Fitness)
+    if not dry_run and downloads_count < settings.MAX_DOWNLOADS_PER_CYCLE:
+        downloads_count = download_pending_qualified_candidates(
+            downloads_count=downloads_count,
+            max_downloads=settings.MAX_DOWNLOADS_PER_CYCLE,
+            dry_run=dry_run
+        )
 
     msg_finish = f"Ciclo finalizado. Vídeos baixados para corte: {downloads_count}"
     record_heartbeat("radar_youtube", "OK", msg_finish)
@@ -374,7 +452,10 @@ def main():
         if args.once or args.dry_run:
             break
 
-        time.sleep(settings.RADAR_INTERVAL_MINUTES * 60)
+        if PipelineController.is_paused("radar_youtube"):
+            time.sleep(5)
+        else:
+            time.sleep(settings.RADAR_INTERVAL_MINUTES * 60)
 
 if __name__ == "__main__":
     main()

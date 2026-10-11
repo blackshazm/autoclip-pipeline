@@ -9,9 +9,12 @@ import json
 import hmac
 import hashlib
 import subprocess
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 import requests
+from urllib3.util import Retry
+from requests.adapters import HTTPAdapter
 
 from src.core.config import settings
 from src.core.logger import get_logger
@@ -27,6 +30,17 @@ class SupoclipClient:
         self.user_id = settings.SUPOCLIP_USER_ID
         self.auth_secret = getattr(settings, "SUPOCLIP_AUTH_SECRET", "change_me_backend_auth_secret")
         self.api_key = getattr(settings, "SUPOCLIP_API_KEY", "")
+
+        self.session = requests.Session()
+        retries = Retry(
+            total=3,
+            backoff_factor=1.0,
+            status_forcelist=[502, 503, 504],
+            raise_on_status=False
+        )
+        adapter = HTTPAdapter(max_retries=retries)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
 
     def _get_auth_headers(self) -> Dict[str, str]:
         if self.api_key:
@@ -65,7 +79,10 @@ class SupoclipClient:
             logger.info(f"Fazendo upload do video {video_path.name} para o Supoclip ({upload_url})...")
             with open(video_path, "rb") as f:
                 files = {"video": (video_path.name, f, "video/mp4")}
-                resp_upload = requests.post(upload_url, files=files, headers=headers, timeout=self.timeout)
+                resp_upload = self.session.post(upload_url, files=files, headers=headers, timeout=self.timeout)
+
+            if resp_upload.status_code in (401, 403):
+                raise SupoclipError(f"Falha de autenticacao no Supoclip /upload ({resp_upload.status_code})")
 
             if resp_upload.status_code not in (200, 201):
                 raise SupoclipError(f"Erro no upload ({resp_upload.status_code}): {resp_upload.text}")
@@ -90,12 +107,19 @@ class SupoclipClient:
             "caption_template": "default",
             "min_duration": getattr(settings, "CLIP_MIN_DURATION_SECONDS", 50),
             "max_duration": getattr(settings, "CLIP_MAX_DURATION_SECONDS", 75),
-            "target_duration": 60
+            "target_duration": 60,
+            "cleanup_settings": {
+                "cut_long_pauses": getattr(settings, "CUT_LONG_PAUSES", True),
+                "pause_threshold_ms": getattr(settings, "PAUSE_THRESHOLD_MS", 400),
+                "remove_filler_words": False
+            }
         }
         try:
             headers_json = self._get_auth_headers()
             headers_json["Content-Type"] = "application/json"
-            resp_task = requests.post(create_task_url, json=payload, headers=headers_json, timeout=30)
+            resp_task = self.session.post(create_task_url, json=payload, headers=headers_json, timeout=30)
+            if resp_task.status_code in (401, 403):
+                raise SupoclipError(f"Falha de autenticacao ao criar tarefa no Supoclip ({resp_task.status_code})")
             if resp_task.status_code not in (200, 201):
                 raise SupoclipError(f"Erro ao criar tarefa no Supoclip ({resp_task.status_code}): {resp_task.text}")
 
@@ -122,9 +146,11 @@ class SupoclipClient:
         url = f"{self.base_url}/tasks/{job_id}"
         headers = self._get_auth_headers()
         try:
-            response = requests.get(url, headers=headers, timeout=30)
+            response = self.session.get(url, headers=headers, timeout=30)
             if response.status_code == 404:
                 return {"status": "FAILED", "error": f"Job/Task {job_id} nao encontrado no Supoclip."}
+            if response.status_code in (401, 403):
+                return {"status": "FAILED", "error": f"Nao autorizado no Supoclip (HTTP {response.status_code})"}
             if response.status_code != 200:
                 return {"status": "PROCESSING", "message": f"HTTP {response.status_code}"}
 
@@ -149,11 +175,17 @@ class SupoclipClient:
                         download_url = f"{self.base_url}{video_url}" if video_url.startswith("/") else video_url
                         try:
                             dl_headers = self._get_auth_headers()
-                            with requests.get(download_url, headers=dl_headers, stream=True, timeout=120) as r:
+                            temp_clip_path = local_clip_path.with_suffix(".download.tmp")
+                            with self.session.get(download_url, headers=dl_headers, stream=True, timeout=120) as r:
                                 if r.status_code == 200:
-                                    with open(local_clip_path, "wb") as f_out:
+                                    with open(temp_clip_path, "wb") as f_out:
                                         for chunk in r.iter_content(chunk_size=65536):
                                             f_out.write(chunk)
+                                    if temp_clip_path.exists() and temp_clip_path.stat().st_size > 0:
+                                        temp_clip_path.replace(local_clip_path)
+                                    else:
+                                        temp_clip_path.unlink(missing_ok=True)
+                                        logger.warning(f"Download do corte {clip_id} resultou em arquivo vazio.")
                                 else:
                                     logger.warning(f"Nao foi possivel baixar o corte {clip_id}: HTTP {r.status_code}")
                         except Exception as e:

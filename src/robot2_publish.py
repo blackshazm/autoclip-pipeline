@@ -3,6 +3,7 @@ MÓDULO 2: Inteligência, Agendamento e Publicação Multiplataforma (robot2_pub
 Sincronização com Supoclip, Copywriting LLM, Lease-Lock e Publicação Resiliente.
 """
 import argparse
+import gc
 import json
 import time
 import uuid
@@ -21,10 +22,12 @@ from src.services.youtube_browser_publisher import YouTubeBrowserPublisher
 from src.services.tiktok_publisher import TikTokPublisher
 from src.services.tiktok_browser_publisher import TikTokBrowserPublisher
 from src.services.notifier import notify_published_clip, notify_alert
-from src.services.media_validator import verify_media_integrity
+from src.services.media_validator import verify_media_integrity, inspect_media_file
 from src.services.watchdog import record_heartbeat
+from src.services.cleanup import check_and_purge_clip_if_fully_published
 from src.core.exceptions import QuotaExceededError
 from src.core.process_signals import SignalTracker
+from src.core.pipeline_control import PipelineController
 
 logger = get_logger("robot2_publish")
 
@@ -34,6 +37,7 @@ def sync_supoclip_jobs(client: SupoclipClient) -> int:
     """Consulta o Supoclip sobre o status de jobs pendentes e processa clips gerados."""
     completed_jobs = 0
 
+    # --- Leitura atômica (transação curta) ---
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -42,41 +46,66 @@ def sync_supoclip_jobs(client: SupoclipClient) -> int:
             JOIN long_videos v ON j.long_video_id = v.id
             WHERE j.status IN ('SUBMITTED', 'PROCESSING');
         """)
-        pending_jobs = cursor.fetchall()
+        pending_jobs = [dict(r) for r in cursor.fetchall()]
 
-        for job in pending_jobs:
-            job_db_id = job["id"]
-            long_video_id = job["long_video_id"]
-            supo_id = job["supoclip_job_id"]
-            original_path = Path(job["original_file_path"])
+    # --- Chamadas de rede FORA de qualquer transação ---
+    for idx, job in enumerate(pending_jobs, 1):
+        job_db_id = job["id"]
+        long_video_id = job["long_video_id"]
+        supo_id = job["supoclip_job_id"]
+        original_path = Path(job["original_file_path"])
 
-            status_data = client.get_job_status(supo_id, original_path)
-            current_status = status_data.get("status", "PROCESSING")
+        record_heartbeat("robot2_publish", "RUNNING", f"Sincronizando Supoclip {idx}/{len(pending_jobs)}")
 
-            if current_status == "COMPLETED":
-                clips_list = status_data.get("clips", [])
-                logger.info(
-                    f"Job {supo_id} CONCLUÍDO no Supoclip. {len(clips_list)} clips gerados.",
-                    extra={"event": "supoclip_job_completed", "job_id": supo_id, "clips_count": len(clips_list)}
-                )
+        status_data = client.get_job_status(supo_id, original_path)
+        current_status = status_data.get("status", "PROCESSING")
 
-                from src.services.overlap_filter import filter_overlapping_clips
+        if current_status == "COMPLETED":
+            clips_list = status_data.get("clips", [])
+            logger.info(
+                f"Job {supo_id} CONCLUÍDO no Supoclip. {len(clips_list)} clips gerados.",
+                extra={"event": "supoclip_job_completed", "job_id": supo_id, "clips_count": len(clips_list)}
+            )
 
-                # Aplica Anti-Overlap diretamente nos clips entregues pelo Supoclip
-                for c in clips_list:
-                    c["long_video_id"] = long_video_id
-                kept_clips, discarded_clips = filter_overlapping_clips(clips_list, max_overlap_threshold=0.25)
-                discarded_uids = {d["clip_uid"]: d.get("_overlap_reason", "Sobreposição temporal detectada") for d in discarded_clips}
+            from src.services.overlap_filter import filter_overlapping_clips
 
-                # Persiste os clips gerados
+            for c in clips_list:
+                c["long_video_id"] = long_video_id
+            kept_clips, discarded_clips = filter_overlapping_clips(clips_list, max_overlap_threshold=0.25)
+            discarded_uids = {d["clip_uid"]: d.get("_overlap_reason", "Sobreposição temporal detectada") for d in discarded_clips}
+
+            # --- Escrita atômica por job (transação curta) ---
+            with get_db() as conn:
+                cursor = conn.cursor()
                 for c in clips_list:
                     clip_uid = c["clip_uid"]
                     virality_score = int(c.get("virality_score", 0))
                     is_overlap = clip_uid in discarded_uids
                     is_qualified = (virality_score >= settings.MIN_VIRALITY_SCORE) and not is_overlap
 
+                    clip_file = Path(c["file_path"])
+                    clip_duration = float(c.get("duration_seconds") or 0)
+
+                    # Aplica Enquadramento Facial Inteligente (Modo Híbrido: Smart Headroom / Blurred Fit) se habilitado
+                    if is_qualified and getattr(settings, "ENABLE_SMART_REFRAME", True) and clip_file.exists():
+                        try:
+                            from src.services.smart_reframe import apply_smart_reframe
+                            apply_smart_reframe(clip_file)
+                        except Exception as e_reframe:
+                            logger.warning(f"Smart reframe ignorado para clip {clip_uid}: {e_reframe}")
+
+                    # Aplica Otimização Audiovisual (Pacing 1.05x, Loudnorm e Seamless Loop) se habilitado
+                    if is_qualified and (getattr(settings, "ENABLE_VIDEO_PACING", True) or getattr(settings, "ENABLE_SEAMLESS_LOOP", True)) and clip_file.exists():
+                        try:
+                            from src.services.video_pacing import optimize_clip_pacing
+                            if optimize_clip_pacing(clip_file, speed_factor=getattr(settings, "VIDEO_SPEED_FACTOR", 1.05)):
+                                media_meta = inspect_media_file(clip_file)
+                                clip_duration = round(float(media_meta.get("duration_seconds") or clip_duration), 2)
+                        except Exception as e_pacing:
+                            logger.warning(f"Otimização de retenção/loop ignorada para clip {clip_uid}: {e_pacing}")
+
                     mod_status = 'APPROVED' if is_qualified else 'MODERATION_BLOCKED'
-                    pub_status = 'PENDING' if is_qualified else ('SKIPPED_OVERLAP' if is_overlap else 'SKIPPED')
+                    pub_status = 'PENDING' if is_qualified else 'SKIPPED'
                     err_msg = discarded_uids.get(clip_uid) if is_overlap else None
 
                     cursor.execute("""
@@ -89,8 +118,8 @@ def sync_supoclip_jobs(client: SupoclipClient) -> int:
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(clip_uid) DO NOTHING;
                     """, (
-                        long_video_id, clip_uid, c["file_path"], virality_score,
-                        c.get("start_seconds"), c.get("end_seconds"), c.get("duration_seconds"),
+                        long_video_id, clip_uid, str(clip_file), virality_score,
+                        c.get("start_seconds"), c.get("end_seconds"), clip_duration,
                         c.get("width"), c.get("height"), c.get("fps"), c.get("transcription_path"),
                         mod_status, pub_status, pub_status,
                         c.get("series_id"),
@@ -99,50 +128,99 @@ def sync_supoclip_jobs(client: SupoclipClient) -> int:
                         err_msg
                     ))
 
-                # Atualiza status do job e do vídeo longo
                 cursor.execute("UPDATE supoclip_jobs SET status = 'COMPLETED', completed_at = datetime('now') WHERE id = ?;", (job_db_id,))
-                cursor.execute("UPDATE long_videos SET status = 'COMPLETED', completed_at = datetime('now') WHERE id = ?;", (long_video_id,))
-                completed_jobs += 1
+                
+                # Auto-cleanup imediato do vídeo longo bruto original pós-fatiamento
+                is_del = 0
+                if getattr(settings, "AUTO_DELETE_LONG_VIDEOS_ON_COMPLETION", True):
+                    if original_path and original_path.exists():
+                        try:
+                            orig_size = original_path.stat().st_size
+                            original_path.unlink()
+                            is_del = 1
+                            logger.info(
+                                f"Auto-cleanup: Vídeo longo bruto purgado ({orig_size / (1024*1024):.2f} MB): {original_path.name}",
+                                extra={"event": "purge_long_video_on_sync", "video_id": long_video_id}
+                            )
+                        except Exception as e:
+                            logger.error(f"Erro ao purgar vídeo longo bruto {original_path}: {e}")
 
-            elif current_status == "FAILED":
-                error_msg = status_data.get("error", "Erro não especificado no Supoclip")
-                logger.error(f"Job {supo_id} FALHOU no Supoclip: {error_msg}")
+                cursor.execute("UPDATE long_videos SET status = 'COMPLETED', completed_at = datetime('now'), is_deleted_from_disk = ? WHERE id = ?;", (is_del, long_video_id))
+            completed_jobs += 1
+
+        elif current_status == "FAILED":
+            error_msg = status_data.get("error", "Erro não especificado no Supoclip")
+            logger.error(f"Job {supo_id} FALHOU no Supoclip: {error_msg}")
+            with get_db() as conn:
+                cursor = conn.cursor()
                 cursor.execute("UPDATE supoclip_jobs SET status = 'FAILED', error_message = ? WHERE id = ?;", (error_msg, job_db_id))
                 cursor.execute("UPDATE long_videos SET status = 'FAILED', error_message = ? WHERE id = ?;", (error_msg, long_video_id))
 
     return completed_jobs
 
+
 def enrich_clips_with_copywriting() -> int:
-    """Gera metadados (título, descrição, tags) via LLM para clips aprovados sem cópia."""
+    """Gera metadados (título, descrição, tags) via LLM para clips aprovados sem cópia (cadenciado)."""
+    # 1. Checa condições de segurança de memória e concorrência via PipelineController
+    can_run, reason = PipelineController.can_run_copywriter()
+    if not can_run:
+        logger.info(reason)
+        SignalTracker.emit_progress("llm_copywriter", 0, 1, reason)
+        return 0
+
     enriched_count = 0
+    max_copies_per_cycle = getattr(settings, "MAX_COPIES_PER_CYCLE", 2)
 
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, clip_uid, transcription_path, virality_score, series_id, part_number, total_parts
-            FROM clips
-            WHERE virality_score >= ? 
-              AND moderation_status = 'APPROVED'
-              AND title IS NULL;
-        """, (settings.MIN_VIRALITY_SCORE,))
-        clips = cursor.fetchall()
+            SELECT c.id, c.clip_uid, c.transcription_path, c.virality_score, c.series_id, c.part_number, c.total_parts,
+                   COALESCE(sc.niche, 'general') as clip_niche
+            FROM clips c
+            LEFT JOIN long_videos lv ON c.long_video_id = lv.id
+            LEFT JOIN source_channels sc ON lv.source_channel_id = sc.id
+            WHERE c.virality_score >= ? 
+              AND c.moderation_status = 'APPROVED'
+              AND c.title IS NULL
+            ORDER BY c.id ASC
+            LIMIT ?;
+        """, (settings.MIN_VIRALITY_SCORE, max_copies_per_cycle))
+        clips = [dict(row) for row in cursor.fetchall()]
 
-        for clip in clips:
-            clip_id = clip["id"]
-            trans_path = Path(clip["transcription_path"]) if clip["transcription_path"] else None
-            
-            transcript_text = ""
-            if trans_path and trans_path.exists():
-                with open(trans_path, "r", encoding="utf-8") as f:
-                    transcript_text = f.read()
+    for idx, clip in enumerate(clips, 1):
+        # Reavalia condições de memória antes de cada clip
+        can_run_next, reason_next = PipelineController.can_run_copywriter()
+        if not can_run_next:
+            logger.info(f"Interrompendo lote de copywriting: {reason_next}")
+            break
 
-            if not transcript_text:
-                transcript_text = f"Corte de alta retenção {clip['clip_uid']} com score {clip['virality_score']}."
+        record_heartbeat("robot2_publish", "RUNNING", f"Gerando copy {idx}/{len(clips)} (clip {clip['clip_uid']})")
 
-            result = generate_clip_copy(clip_id, transcript_text, conn=conn, part_number=clip["part_number"] or 1, total_parts=clip["total_parts"] or 1)
-            meta = result["metadata"]
+        clip_id = clip["id"]
+        clip_niche = clip.get("clip_niche") or "general"
+        trans_path = Path(clip["transcription_path"]) if clip["transcription_path"] else None
+        
+        transcript_text = ""
+        if trans_path and trans_path.exists():
+            with open(trans_path, "r", encoding="utf-8") as f:
+                transcript_text = f.read()
 
-            cursor.execute("""
+        if not transcript_text:
+            transcript_text = f"Corte de alta retenção {clip['clip_uid']} com score {clip['virality_score']}."
+
+        result = generate_clip_copy(
+            clip_id,
+            transcript_text,
+            conn=None,
+            part_number=clip["part_number"] or 1,
+            total_parts=clip["total_parts"] or 1,
+            niche=clip_niche
+        )
+        meta = result["metadata"]
+
+        with get_db() as update_conn:
+            update_cursor = update_conn.cursor()
+            update_cursor.execute("""
                 UPDATE clips
                 SET title = ?,
                     description = ?,
@@ -158,11 +236,16 @@ def enrich_clips_with_copywriting() -> int:
                 1 if result["is_fallback"] else 0,
                 clip_id
             ))
-            enriched_count += 1
-            logger.info(
-                f"Copywriting gerado para clip {clip['clip_uid']}: '{meta['title']}'",
-                extra={"event": "copywriting_done", "clip_id": clip_id, "title": meta["title"]}
-            )
+
+        enriched_count += 1
+        logger.info(
+            f"Copywriting gerado para clip {clip['clip_uid']}: '{meta['title']}'",
+            extra={"event": "copywriting_done", "clip_id": clip_id, "title": meta["title"]}
+        )
+
+        # Pausa de estabilização e coleta de lixo entre cada corte
+        time.sleep(1.0)
+        gc.collect()
 
     return enriched_count
 
@@ -188,31 +271,39 @@ def process_due_publications() -> int:
         reconciled = cursor.rowcount
         if reconciled > 0:
             logger.warning(f"{reconciled} publicações marcadas para reconciliação pós-crash/timeout.", extra={"event": "reconciliation_marked"})
+        conn.commit()
 
-        # 2. Busca publicações prontas para envio
+        # 2. Busca publicações prontas para envio com dados de conta e nicho
+        max_pubs = getattr(settings, "MAX_PUBLICATIONS_PER_CYCLE", 5)
         cursor.execute("""
             SELECT p.id, p.clip_id, p.platform, p.publishing_account_id,
-                   c.clip_uid, c.file_path, c.title, c.description, c.tags, c.virality_score
+                   c.clip_uid, c.file_path, c.title, c.description, c.tags, c.virality_score,
+                   pa.profile_name, pa.credentials_ref, pa.external_channel_id, pa.niche as account_niche
             FROM publications p
             JOIN clips c ON p.clip_id = c.id
+            LEFT JOIN publishing_accounts pa ON p.publishing_account_id = pa.id
             WHERE p.status = 'SCHEDULED' AND p.scheduled_for <= ?
-            ORDER BY p.scheduled_for ASC;
-        """, (now_iso,))
+            ORDER BY p.scheduled_for ASC
+            LIMIT ?;
+        """, (now_iso, max_pubs))
         due_pubs = cursor.fetchall()
 
-        youtube_quota_exhausted = False
-        for pub in due_pubs:
+        exhausted_account_ids = set()
+        for idx, pub_row in enumerate(due_pubs, 1):
+            pub = dict(pub_row)
             pub_id = pub["id"]
             clip_id = pub["clip_id"]
             platform = pub["platform"]
             clip_uid = pub["clip_uid"]
             file_path = Path(pub["file_path"])
-            title = pub["title"]
-            description = pub["description"]
+            title = pub["title"] or "Corte #Shorts"
+            description = pub["description"] or ""
             tags = json.loads(pub["tags"]) if pub["tags"] else ["#shorts", "#cortes"]
 
-            if platform == "youtube" and youtube_quota_exhausted:
-                logger.info(f"Pulando publicação {pub_id} (YouTube) pois o limite diário de upload já foi atingido hoje.")
+            record_heartbeat("robot2_publish", "RUNNING", f"Publicando {idx}/{len(due_pubs)} ({platform})", conn=conn)
+
+            if pub.get("publishing_account_id") in exhausted_account_ids:
+                logger.info(f"Pulando publicação {pub_id} ({platform}) pois a conta {pub.get('publishing_account_id')} já atingiu cota hoje.")
                 continue
 
             # 3. Tenta adquirir Lease Lock atômico
@@ -240,6 +331,11 @@ def process_due_publications() -> int:
                 cursor.execute("""
                     UPDATE clips SET moderation_status = 'MODERATION_BLOCKED', error_log = 'Arquivo inválido ou tela preta detectada' WHERE id = ?;
                 """, (clip_id,))
+                try:
+                    notify_alert("WARNING", "robot2_publish", f"Arquivo Inválido ({platform})", f"O arquivo {file_path.name} está corrompido ou é tela preta.", conn=conn)
+                except Exception:
+                    pass
+                conn.commit()
                 continue
 
             try:
@@ -247,12 +343,18 @@ def process_due_publications() -> int:
                     yt_res = None
                     if getattr(settings, "YOUTUBE_PUBLISHER_MODE", "api") == "browser":
                         try:
-                            browser_pub = YouTubeBrowserPublisher()
+                            acc_niche = pub.get("account_niche") or "general"
+                            cred_ref = pub.get("credentials_ref")
+                            ext_ch_id = pub.get("external_channel_id")
+                            yt_pdir = Path(f"./data/youtube_browser_profile_{acc_niche}") if acc_niche not in ("general", "default") else settings.YOUTUBE_BROWSER_PROFILE_DIR
+                            yt_sfile = Path(cred_ref) if cred_ref else (Path(f"./config/youtube_{acc_niche}_state.json") if acc_niche not in ("general", "default") else settings.YOUTUBE_BROWSER_STATE_FILE)
+
+                            browser_pub = YouTubeBrowserPublisher(profile_dir=yt_pdir, state_file=yt_sfile, channel_id=ext_ch_id)
                             yt_res = browser_pub.publish_short(file_path, title, description, tags, clip_uid)
                         except Exception as browser_err:
                             if getattr(settings, "YOUTUBE_BROWSER_FALLBACK_TO_API", True):
                                 logger.warning(
-                                    f"Falha no YouTubeBrowserPublisher: {browser_err}. Acionando fallback automático para API oficial..."
+                                    f"Falha no YouTubeBrowserPublisher ({acc_niche}): {browser_err}. Acionando fallback automático para API oficial..."
                                 )
                                 yt_res = yt_publisher.publish_short(file_path, title, description, tags, clip_uid)
                             else:
@@ -280,17 +382,24 @@ def process_due_publications() -> int:
                         {"title": title, "virality_score": pub["virality_score"]},
                         {"youtube": f"https://youtube.com/shorts/{yt_id}"}
                     )
+                    # Hook de Auto-Cleanup reativo imediato (se publicado em ambas as plataformas)
+                    check_and_purge_clip_if_fully_published(clip_id, conn=conn)
 
                 elif platform == "tiktok":
                     tk_res = None
                     if getattr(settings, "TIKTOK_PUBLISHER_MODE", "browser") == "browser":
                         try:
-                            browser_tk = TikTokBrowserPublisher()
+                            acc_niche = pub.get("account_niche") or "general"
+                            cred_ref = pub.get("credentials_ref")
+                            tk_pdir = Path(f"./data/tiktok_browser_profile_{acc_niche}") if acc_niche not in ("general", "default") else getattr(settings, "TIKTOK_BROWSER_PROFILE_DIR", Path("./data/tiktok_browser_profile"))
+                            tk_sfile = Path(cred_ref) if cred_ref else (Path(f"./config/tiktok_{acc_niche}_state.json") if acc_niche not in ("general", "default") else getattr(settings, "TIKTOK_BROWSER_STATE_FILE", Path("./config/tiktok_state.json")))
+
+                            browser_tk = TikTokBrowserPublisher(profile_dir=tk_pdir, state_file=tk_sfile)
                             tk_res = browser_tk.publish_video(file_path, title, tags, clip_uid)
                         except Exception as tk_browser_err:
                             if getattr(settings, "TIKTOK_BROWSER_FALLBACK_TO_API", False):
                                 logger.warning(
-                                    f"Falha no TikTokBrowserPublisher: {tk_browser_err}. Acionando fallback para API oficial..."
+                                    f"Falha no TikTokBrowserPublisher ({acc_niche}): {tk_browser_err}. Acionando fallback para API oficial..."
                                 )
                                 tk_res = tk_publisher.publish_video(file_path, title, tags, clip_uid)
                             else:
@@ -318,10 +427,12 @@ def process_due_publications() -> int:
                         {"title": title, "virality_score": pub["virality_score"]},
                         {"tiktok": f"https://www.tiktok.com/@post/{tk_id}"}
                     )
+                    # Hook de Auto-Cleanup reativo imediato (se publicado em ambas as plataformas)
+                    check_and_purge_clip_if_fully_published(clip_id, conn=conn)
 
             except QuotaExceededError as q_err:
                 logger.error(f"Limite diário de upload atingido no YouTube ao processar {pub_id}. Pausando fila do YouTube por 24h.")
-                youtube_quota_exhausted = True
+                exhausted_account_ids.add(pub.get("publishing_account_id"))
                 cursor.execute("""
                     UPDATE publications
                     SET status = 'FAILED_QUOTA',
@@ -331,12 +442,12 @@ def process_due_publications() -> int:
                 """, (pub_id,))
                 cursor.execute("UPDATE clips SET youtube_status = 'FAILED_QUOTA' WHERE id = ?;", (clip_id,))
                 
-                # Adia todas as publicações pendentes do YouTube para daqui a 24 horas
+                # Adia apenas as publicações pendentes da CONTA ESPECÍFICA para daqui a 24 horas
                 cursor.execute("""
                     UPDATE publications
                     SET scheduled_for = datetime('now', '+24 hours')
-                    WHERE platform = 'youtube' AND status = 'SCHEDULED';
-                """)
+                    WHERE platform = 'youtube' AND publishing_account_id = ? AND status = 'SCHEDULED';
+                """, (pub["publishing_account_id"],))
                 conn.commit()
                 SignalTracker.emit_finish(
                     "youtube_publisher",
@@ -372,14 +483,28 @@ def process_due_publications() -> int:
                             error_message = ?
                         WHERE id = ?;
                     """, (str(e), pub_id))
+                    if platform == "youtube":
+                        cursor.execute("UPDATE clips SET youtube_status = 'FAILED', error_log = ? WHERE id = ?;", (str(e), clip_id))
+                    elif platform == "tiktok":
+                        cursor.execute("UPDATE clips SET tiktok_status = 'FAILED', error_log = ? WHERE id = ?;", (str(e), clip_id))
                     logger.warning(f"Publicação {pub_id} ({platform}) falhou definitivamente após 3 tentativas.")
                 conn.commit()
-                notify_alert("WARNING", "robot2_publish", f"Erro Upload ({platform})", str(e), conn=conn)
+                try:
+                    notify_alert("WARNING", "robot2_publish", f"Erro Upload ({platform})", str(e), conn=conn)
+                except Exception as alert_err:
+                    logger.debug(f"Erro ao disparar notify_alert pós-falha de publicação: {alert_err}")
 
     return published_count
 
 def run_publisher_cycle() -> Dict[str, int]:
     """Executa um ciclo completo de inteligência, agendamento e postagem."""
+    if PipelineController.is_paused("robot2_publish"):
+        msg = "⏸️ Robô 2 (Publicador) pausado pelo usuário. Em espera..."
+        record_heartbeat("robot2_publish", "PAUSED", msg)
+        SignalTracker.emit_progress("robot2_publish", 0, 1, msg)
+        logger.info(msg)
+        return {"jobs_synced": 0, "copies_generated": 0, "clips_scheduled": 0, "pubs_done": 0}
+
     record_heartbeat("robot2_publish", "RUNNING", f"Worker {WORKER_ID} ativo")
     SignalTracker.emit_start(
         "robot2_publish",
@@ -437,7 +562,10 @@ def main():
         if args.once:
             break
 
-        time.sleep(30)
+        if PipelineController.is_paused("robot2_publish"):
+            time.sleep(5)
+        else:
+            time.sleep(30)
 
 if __name__ == "__main__":
     main()

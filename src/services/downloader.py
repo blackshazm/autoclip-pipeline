@@ -42,10 +42,17 @@ def download_youtube_video(youtube_id: str, output_dir: Optional[Path] = None) -
         url
     ]
 
-    # Injeta cookies se o arquivo existir
-    if settings.YTDLP_COOKIES_PATH.exists() and settings.YTDLP_COOKIES_PATH.stat().st_size > 0:
-        cmd.extend(["--cookies", str(settings.YTDLP_COOKIES_PATH)])
-        logger.debug("Utilizando cookies.txt para autenticação do yt-dlp.")
+    # Injeta cookies se o arquivo existir (procura cookies atualizados do canal ou geral)
+    cookies_target = None
+    config_dir = Path("./config")
+    for candidate_cookie in [settings.YTDLP_COOKIES_PATH, config_dir / "cookies_fitness.txt", config_dir / "cookies_financas.txt"]:
+        if candidate_cookie.exists() and candidate_cookie.stat().st_size > 0:
+            cookies_target = candidate_cookie
+            break
+
+    if cookies_target:
+        cmd.extend(["--cookies", str(cookies_target)])
+        logger.debug(f"Utilizando {cookies_target.name} para autenticação do yt-dlp.")
 
     logger.info(f"Iniciando download do vídeo {youtube_id}...", extra={"event": "download_start", "youtube_id": youtube_id})
 
@@ -79,6 +86,9 @@ def download_youtube_video(youtube_id: str, output_dir: Optional[Path] = None) -
             extra={"event": "download_success", "youtube_id": youtube_id, "size_bytes": final_file.stat().st_size}
         )
         return final_file
+    except FileNotFoundError:
+        logger.error("yt-dlp executável não encontrado durante execução.")
+        return None
 
     except subprocess.TimeoutExpired:
         logger.error(f"Timeout ao baixar vídeo {youtube_id}")

@@ -1,18 +1,21 @@
 """
 Serviço de Copywriting Inteligente com Hermes / OpenAI, Sanitização Flexível e Fallback Contextual Dinâmico.
 """
+import gc
 import json
 import re
 import sqlite3
 import time
 import unicodedata
 from typing import Dict, Any, List, Optional
+import requests
 from openai import OpenAI
 from pydantic import BaseModel, Field, field_validator
 
 from src.core.config import settings
 from src.core.logger import get_logger
 from src.core.database import get_db
+from src.core.pipeline_control import PipelineController
 
 logger = get_logger("llm_copywriter")
 
@@ -108,7 +111,7 @@ DETERMINISTIC_FALLBACK = {
     "tags": ["#shorts", "#cortes", "#podcast", "#viral"]
 }
 
-def build_contextual_fallback(transcription: str, clip_id: int, part_number: int = 1, total_parts: int = 1) -> Dict[str, Any]:
+def build_contextual_fallback(transcription: str, clip_id: int, part_number: int = 1, total_parts: int = 1, niche: Optional[str] = None) -> Dict[str, Any]:
     """
     Gera título, descrição e tags exclusivos a partir do texto real da fala
     quando a LLM estiver temporariamente indisponível.
@@ -183,6 +186,10 @@ def build_contextual_fallback(transcription: str, clip_id: int, part_number: int
     tags = ["#shorts", "#cortes"]
     if total_parts > 1:
         tags.append("#serie")
+    if niche == "fitness":
+        tags.extend(["#maromba", "#treino", "#dieta"])
+    elif niche == "financas":
+        tags.extend(["#investimentos", "#dinheiro", "#sucesso"])
     for w in kw:
         tag = f"#{w}"
         if tag not in tags and len(tag) > 4:
@@ -207,125 +214,167 @@ def sanitize_transcription(text: str) -> str:
         cleaned = cleaned[:2000] + "... [truncado]"
     return cleaned
 
-def generate_clip_copy(clip_id: int, transcription: str, conn: Optional[sqlite3.Connection] = None, part_number: int = 1, total_parts: int = 1) -> Dict[str, Any]:
+def unload_ollama_model(model_name: str) -> None:
+    """Descarrega modelo da RAM/VRAM no Ollama para liberar memória imediatamente."""
+    try:
+        base = settings.OPENAI_BASE_URL.rstrip("/").removesuffix("/v1")
+        if "localhost" in base or "127.0.0.1" in base:
+            requests.post(f"{base}/api/generate", json={"model": model_name, "keep_alive": 0}, timeout=5)
+    except Exception:
+        pass
+
+def generate_clip_copy(clip_id: int, transcription: str, conn: Optional[sqlite3.Connection] = None, part_number: int = 1, total_parts: int = 1, niche: Optional[str] = None) -> Dict[str, Any]:
     """
-    Gera título, descrição e tags a partir da transcrição do corte.
+    Gera título, descrição e tags a partir da transcrição do corte, com suporte a nicho temático.
     Em caso de falha de conexão, timeout ou schema inválido, ativa fallback contextual inteligente.
     """
-    client = OpenAI(
-        base_url=settings.OPENAI_BASE_URL,
-        api_key=settings.OPENAI_API_KEY,
-        timeout=settings.LLM_TIMEOUT_SECONDS
-    )
+    can_run, reason = PipelineController.can_run_copywriter()
+    if not can_run:
+        logger.warning(
+            f"Copywriter LLM suspenso para clip_id={clip_id} ({reason}). Utilizando fallback contextual de baixo consumo.",
+            extra={"event": "llm_skipped_memory", "clip_id": clip_id, "reason": reason}
+        )
+        fallback_meta = build_contextual_fallback(transcription, clip_id, part_number=part_number, total_parts=total_parts, niche=niche)
+        return {
+            "metadata": fallback_meta,
+            "status": "FALLBACK",
+            "is_fallback": True
+        }
 
-    clean_text = sanitize_transcription(transcription)
-    series_instruction = ""
-    if total_parts > 1:
-        series_instruction = f"\nATENÇÃO: Este corte é a PARTE {part_number} DE {total_parts} de uma série. O título DEVE começar obrigatoriamente com \'[Parte {part_number}/{total_parts}]\'. A descrição deve situar a parte atual e incentivar a ver as outras partes.\n"
-
-    user_prompt = f"<<<TRANSCRICAO_INICIO>>>\n{clean_text}\n<<<TRANSCRICAO_FIM>>>{series_instruction}\nGere o JSON válido com title, description e tags agora:"
-
-    start_time = time.time()
-    raw_response = ""
-    parsed_json: Optional[Dict[str, Any]] = None
-    status = "SUCCESS"
-    model_name = settings.OPENAI_MODEL
-
-    for attempt in range(settings.LLM_MAX_RETRIES + 1):
-        try:
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=settings.LLM_TEMPERATURE,
-                response_format={"type": "json_object"},
-                extra_body={"options": {"num_ctx": 2048}}
-            )
-            raw_response = response.choices[0].message.content or "{}"
-            cleaned_resp = raw_response.strip()
-            
-            # Remove blocos de reasoning/thinking (<think>...</think>) característicos de modelos 3.5 / R1
-            cleaned_resp = re.sub(r'<think>.*?</think>', '', cleaned_resp, flags=re.DOTALL).strip()
-            
-            # Remove blocos markdown caso o modelo adicione
-            if cleaned_resp.startswith("```json"):
-                cleaned_resp = cleaned_resp[7:]
-            elif cleaned_resp.startswith("```"):
-                cleaned_resp = cleaned_resp[3:]
-            if cleaned_resp.endswith("```"):
-                cleaned_resp = cleaned_resp[:-3]
-            
-            # Extrai o primeiro bloco delimitado por { ... } para evitar texto introdutório ou conclusivo
-            json_match = re.search(r'(\{[\s\S]*\})', cleaned_resp)
-            if json_match:
-                cleaned_resp = json_match.group(1)
-            
-            raw_data = json.loads(cleaned_resp.strip())
-            
-            # Garante prefixo [Parte X/Y] se for série
-            if total_parts > 1 and "title" in raw_data:
-                p_tag = f"[Parte {part_number}/{total_parts}]"
-                if p_tag not in raw_data["title"]:
-                    raw_data["title"] = f"{p_tag} {raw_data['title']}"
-            
-            # Validação e higienização automática resiliente
-            validated = ClipMetadataOutput(**raw_data)
-            parsed_json = validated.model_dump()
-            status = "SUCCESS"
-            break
-
-        except Exception as e:
-            logger.warning(
-                f"Tentativa {attempt + 1} falhou para clip_id={clip_id}: {e}",
-                extra={"event": "llm_retry", "clip_id": clip_id, "attempt": attempt + 1}
-            )
-            if attempt < settings.LLM_MAX_RETRIES:
-                time.sleep(3.0)
-            else:
-                logger.error(
-                    f"Ativando fallback contextual inteligente para clip_id={clip_id}.",
-                    extra={"event": "llm_fallback_triggered", "clip_id": clip_id}
-                )
-                status = "FALLBACK"
-                parsed_json = build_contextual_fallback(transcription, clip_id, part_number=part_number, total_parts=total_parts)
-
-    latency_ms = int((time.time() - start_time) * 1000)
-
-    # Persiste na auditoria llm_generations apenas se o clip existir no banco (evita FK constraint em testes)
-    sql = """
-        INSERT INTO llm_generations (clip_id, model, prompt_version, status, latency_ms, raw_response, parsed_json)
-        VALUES (?, ?, 'v2.0.0', ?, ?, ?, ?);
-    """
-    params = (
-        clip_id,
-        model_name,
-        status,
-        latency_ms,
-        raw_response[:2000] if raw_response else "",
-        json.dumps(parsed_json, ensure_ascii=False)
-    )
-
-    def _persist_audit_log(target_conn):
-        cursor = target_conn.cursor()
-        cursor.execute("SELECT 1 FROM clips WHERE id = ?;", (clip_id,))
-        if cursor.fetchone():
-            cursor.execute(sql, params)
-        else:
-            logger.debug(f"Log de LLM ignorado para clip_id={clip_id}: clip não encontrado em clips (execução de teste ou benchmark).")
-
+    PipelineController.set_copywriter_active(True)
     try:
-        if conn is not None:
-            _persist_audit_log(conn)
-        else:
-            with get_db() as local_conn:
-                _persist_audit_log(local_conn)
-    except Exception as e:
-        logger.warning(f"Aviso ao salvar log de LLM para clip_id={clip_id}: {e}")
+        client = OpenAI(
+            base_url=settings.OPENAI_BASE_URL,
+            api_key=settings.OPENAI_API_KEY,
+            timeout=settings.LLM_TIMEOUT_SECONDS
+        )
 
-    return {
-        "metadata": parsed_json,
-        "status": status,
-        "is_fallback": status == "FALLBACK"
-    }
+        clean_text = sanitize_transcription(transcription)
+        series_instruction = ""
+        if total_parts > 1:
+            series_instruction = f"\nATENÇÃO: Este corte é a PARTE {part_number} DE {total_parts} de uma série. O título DEVE começar obrigatoriamente com \'[Parte {part_number}/{total_parts}]\'. A descrição deve situar a parte atual e incentivar a ver as outras partes.\n"
+
+        niche_instruction = ""
+        if niche == "fitness":
+            niche_instruction = "\nDIRETRIZ DE NICHO (FITNESS/SHAPE): Enfatize disciplina física, treinos, erros de academia, dietas, transformações ou mitos do shape. Use hashtags como #maromba #treino #dieta #shape #musculacao.\n"
+        elif niche == "financas":
+            niche_instruction = "\nDIRETRIZ DE NICHO (FINANÇAS/MENTALIDADE): Enfatize criação de riqueza, mentalidade, negócios, investimentos, erros financeiros e disciplina. Use hashtags como #investimentos #dinheiro #sucesso #financas #negocios.\n"
+
+        user_prompt = f"<<<TRANSCRICAO_INICIO>>>\n{clean_text}\n<<<TRANSCRICAO_FIM>>>{series_instruction}{niche_instruction}\nGere o JSON válido com title, description e tags agora:"
+
+        start_time = time.time()
+        raw_response = ""
+        parsed_json: Optional[Dict[str, Any]] = None
+        status = "SUCCESS"
+        model_name = settings.OPENAI_MODEL
+
+        is_local_ollama = "localhost" in settings.OPENAI_BASE_URL or "127.0.0.1" in settings.OPENAI_BASE_URL
+        extra_kwargs = {}
+        if is_local_ollama:
+            extra_kwargs["extra_body"] = {"options": {"num_ctx": 2048}, "keep_alive": 0}
+
+        for attempt in range(settings.LLM_MAX_RETRIES + 1):
+            try:
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=settings.LLM_TEMPERATURE,
+                    response_format={"type": "json_object"},
+                    **extra_kwargs
+                )
+                raw_response = response.choices[0].message.content or "{}"
+                cleaned_resp = raw_response.strip()
+                
+                # Remove blocos de reasoning/thinking (<think>...</think>) característicos de modelos 3.5 / R1
+                cleaned_resp = re.sub(r'<think>.*?</think>', '', cleaned_resp, flags=re.DOTALL).strip()
+                
+                # Remove blocos markdown caso o modelo adicione
+                if cleaned_resp.startswith("```json"):
+                    cleaned_resp = cleaned_resp[7:]
+                elif cleaned_resp.startswith("```"):
+                    cleaned_resp = cleaned_resp[3:]
+                if cleaned_resp.endswith("```"):
+                    cleaned_resp = cleaned_resp[:-3]
+                
+                # Extrai o primeiro bloco delimitado por { ... } para evitar texto introdutório ou conclusivo
+                json_match = re.search(r'(\{[\s\S]*\})', cleaned_resp)
+                if json_match:
+                    cleaned_resp = json_match.group(1)
+                
+                raw_data = json.loads(cleaned_resp.strip())
+                
+                # Garante prefixo [Parte X/Y] se for série
+                if total_parts > 1 and "title" in raw_data:
+                    p_tag = f"[Parte {part_number}/{total_parts}]"
+                    if p_tag not in raw_data["title"]:
+                        raw_data["title"] = f"{p_tag} {raw_data['title']}"
+                
+                # Validação e higienização automática resiliente
+                validated = ClipMetadataOutput(**raw_data)
+                parsed_json = validated.model_dump()
+                status = "SUCCESS"
+                break
+
+            except Exception as e:
+                logger.warning(
+                    f"Tentativa {attempt + 1} falhou para clip_id={clip_id}: {e}",
+                    extra={"event": "llm_retry", "clip_id": clip_id, "attempt": attempt + 1}
+                )
+                if attempt < settings.LLM_MAX_RETRIES:
+                    time.sleep(3.0)
+                else:
+                    logger.error(
+                        f"Ativando fallback contextual inteligente para clip_id={clip_id}.",
+                        extra={"event": "llm_fallback_triggered", "clip_id": clip_id}
+                    )
+                    status = "FALLBACK"
+                    parsed_json = build_contextual_fallback(transcription, clip_id, part_number=part_number, total_parts=total_parts)
+
+        latency_ms = int((time.time() - start_time) * 1000)
+
+        # Persiste na auditoria llm_generations apenas se o clip existir no banco (evita FK constraint em testes)
+        sql = """
+            INSERT INTO llm_generations (clip_id, model, prompt_version, status, latency_ms, raw_response, parsed_json)
+            VALUES (?, ?, 'v2.0.0', ?, ?, ?, ?);
+        """
+        params = (
+            clip_id,
+            model_name,
+            status,
+            latency_ms,
+            raw_response[:2000] if raw_response else "",
+            json.dumps(parsed_json, ensure_ascii=False)
+        )
+
+        def _persist_audit_log(target_conn):
+            cursor = target_conn.cursor()
+            cursor.execute("SELECT 1 FROM clips WHERE id = ?;", (clip_id,))
+            if cursor.fetchone():
+                cursor.execute(sql, params)
+            else:
+                logger.debug(f"Log de LLM ignorado para clip_id={clip_id}: clip não encontrado em clips (execução de teste ou benchmark).")
+
+        try:
+            if conn is not None:
+                _persist_audit_log(conn)
+            else:
+                with get_db() as local_conn:
+                    _persist_audit_log(local_conn)
+        except Exception as e:
+            logger.warning(f"Aviso ao salvar log de LLM para clip_id={clip_id}: {e}")
+
+        # Descarrega modelo da RAM apenas se for execução local via Ollama
+        if is_local_ollama:
+            unload_ollama_model(model_name)
+            gc.collect()
+
+        return {
+            "metadata": parsed_json,
+            "status": status,
+            "is_fallback": status == "FALLBACK"
+        }
+    finally:
+        PipelineController.set_copywriter_active(False)

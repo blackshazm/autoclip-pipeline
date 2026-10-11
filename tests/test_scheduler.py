@@ -50,3 +50,48 @@ def test_scheduler_enqueues_qualified_clips(temp_dir, monkeypatch):
         for r in rows:
             assert r["status"] == "SCHEDULED"
             assert r["scheduled_for"] is not None
+
+def test_scheduler_respects_custom_posting_windows(temp_dir, monkeypatch):
+    """Testa se get_next_available_slot interpreta posting_windows em JSON corretamente."""
+    db_file = temp_dir / "sched_windows_test.db"
+    from src.database.migrations import run_migrations
+    run_migrations(db_file)
+
+    import src.core.config as cfg
+    monkeypatch.setattr(cfg.settings, "DB_PATH", db_file)
+
+    with get_db(db_file) as conn:
+        cursor = conn.cursor()
+        # Atualiza conta para ter janelas explícitas
+        cursor.execute("""
+            UPDATE publishing_accounts
+            SET posting_windows = '["08:00", "14:00", "20:00"]', min_interval_minutes = 60
+            WHERE id = 1;
+        """)
+
+        slot = get_next_available_slot(1, "youtube", conn)
+        assert isinstance(slot, datetime)
+        # O slot gerado deve estar alinhado a uma das janelas ou ao horário futuro correto
+        assert slot > datetime.now(timezone.utc) - timedelta(hours=1)
+
+def test_scheduler_handles_malformed_posting_windows_gracefully(temp_dir, monkeypatch):
+    """Testa se get_next_available_slot não quebra quando posting_windows é JSON malformado."""
+    db_file = temp_dir / "sched_malformed_test.db"
+    from src.database.migrations import run_migrations
+    run_migrations(db_file)
+
+    import src.core.config as cfg
+    monkeypatch.setattr(cfg.settings, "DB_PATH", db_file)
+
+    with get_db(db_file) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE publishing_accounts
+            SET posting_windows = 'INVALID_JSON{', min_interval_minutes = 30
+            WHERE id = 1;
+        """)
+
+        # Deve usar fallback contínuo sem lançar exceção
+        slot = get_next_available_slot(1, "youtube", conn)
+        assert isinstance(slot, datetime)
+

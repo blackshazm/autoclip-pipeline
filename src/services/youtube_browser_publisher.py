@@ -27,11 +27,13 @@ class YouTubeBrowserPublisher:
         self,
         profile_dir: Optional[Path] = None,
         state_file: Optional[Path] = None,
-        headless: Optional[bool] = None
+        headless: Optional[bool] = None,
+        channel_id: Optional[str] = None
     ):
         self.profile_dir = profile_dir or settings.YOUTUBE_BROWSER_PROFILE_DIR
         self.state_file = state_file or settings.YOUTUBE_BROWSER_STATE_FILE
         self.headless = headless if headless is not None else settings.YOUTUBE_BROWSER_HEADLESS
+        self.channel_id = channel_id
 
     def is_authenticated(self) -> bool:
         """Verifica se existem cookies ou diretório de perfil configurado."""
@@ -115,7 +117,7 @@ class YouTubeBrowserPublisher:
             raise YouTubePublishError(err_msg)
 
         # Garante a tag #Shorts no título
-        final_title = title.strip()
+        final_title = (title or "").strip()
         if "#Shorts" not in final_title and "#shorts" not in final_title:
             if len(final_title) <= 52:
                 final_title += " #Shorts"
@@ -129,7 +131,7 @@ class YouTubeBrowserPublisher:
         
         tags_block = ("\n\n" + " ".join(formatted_tags)) if formatted_tags else ""
         ref_footer = f"\n\n#Shorts ref:{clip_uid}"
-        final_desc = (description + tags_block + ref_footer)[:5000]
+        final_desc = ((description or "") + tags_block + ref_footer)[:5000]
 
         SignalTracker.emit_start(
             "youtube_publisher",
@@ -149,6 +151,7 @@ class YouTubeBrowserPublisher:
                 )
             }
 
+            browser = None
             if self.profile_dir.exists():
                 try:
                     context = p.chromium.launch_persistent_context(
@@ -161,6 +164,15 @@ class YouTubeBrowserPublisher:
                         user_data_dir=str(self.profile_dir),
                         **context_args
                     )
+                if self.state_file.exists():
+                    try:
+                        import json
+                        state_data = json.loads(self.state_file.read_text(encoding="utf-8"))
+                        cookies = state_data.get("cookies", [])
+                        if cookies:
+                            context.add_cookies(cookies)
+                    except Exception as c_err:
+                        logger.debug(f"Aviso ao injetar cookies no perfil YouTube: {c_err}")
                 page = context.pages[0] if context.pages else context.new_page()
             else:
                 browser = p.chromium.launch(headless=self.headless, args=["--start-maximized"])
@@ -200,7 +212,8 @@ class YouTubeBrowserPublisher:
             try:
                 page.set_default_timeout(60000)
                 SignalTracker.emit_progress("youtube_publisher", 1, 5, "Navegando até o YouTube Studio...")
-                page.goto("https://studio.youtube.com", wait_until="domcontentloaded")
+                target_studio_url = f"https://studio.youtube.com/channel/{self.channel_id}" if self.channel_id else "https://studio.youtube.com"
+                page.goto(target_studio_url, wait_until="domcontentloaded")
 
                 # Se redirecionou para tela de login da Google, sessão expirou
                 if "accounts.google.com" in page.url or "signin" in page.url:
@@ -525,4 +538,12 @@ class YouTubeBrowserPublisher:
                 logger.error(f"Erro durante publicação no YouTube Studio via navegador: {e}", exc_info=True)
                 raise YouTubePublishError(f"Falha na automação Playwright do YouTube: {e}")
             finally:
-                context.close()
+                try:
+                    context.close()
+                except Exception:
+                    pass
+                if browser:
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass

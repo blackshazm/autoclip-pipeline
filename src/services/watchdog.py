@@ -2,8 +2,9 @@
 Watchdog de Integridade Operacional, Heartbeat e Monitor de DLQ.
 """
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import time
+import sqlite3
 
 from src.core.config import settings
 from src.core.logger import get_logger
@@ -12,18 +13,22 @@ from src.services.notifier import notify_alert
 
 logger = get_logger("watchdog")
 
-def record_heartbeat(service_name: str, status: str = "OK", extra_info: str = "") -> None:
+def record_heartbeat(service_name: str, status: str = "OK", extra_info: str = "", conn: Optional[sqlite3.Connection] = None) -> None:
     """Registra ping periódico de vida do worker na tabela system_heartbeats."""
+    sql = """
+        INSERT INTO system_heartbeats (service_name, last_ping, status, extra_info)
+        VALUES (?, datetime('now'), ?, ?)
+        ON CONFLICT(service_name) DO UPDATE SET
+            last_ping = datetime('now'),
+            status = excluded.status,
+            extra_info = excluded.extra_info;
+    """
     try:
-        with get_db() as conn:
-            conn.execute("""
-                INSERT INTO system_heartbeats (service_name, last_ping, status, extra_info)
-                VALUES (?, datetime('now'), ?, ?)
-                ON CONFLICT(service_name) DO UPDATE SET
-                    last_ping = datetime('now'),
-                    status = excluded.status,
-                    extra_info = excluded.extra_info;
-            """, (service_name, status, extra_info))
+        if conn is not None:
+            conn.execute(sql, (service_name, status, extra_info))
+        else:
+            with get_db() as local_conn:
+                local_conn.execute(sql, (service_name, status, extra_info))
     except Exception as e:
         logger.error(f"Erro ao registrar heartbeat para {service_name}: {e}")
 
@@ -84,7 +89,7 @@ def check_dead_letter_queue() -> int:
     return fatal_count
 
 _last_cleanup_timestamp: float = 0.0
-CLEANUP_INTERVAL_SECONDS: int = 3600  # 1 hora
+CLEANUP_INTERVAL_SECONDS: int = 900  # 15 minutos (limpeza proativa contínua)
 
 def run_watchdog_check():
     """Executa checagem única de saúde e rotina periódica de limpeza de disco."""

@@ -24,17 +24,12 @@ wheels/
 *.egg
 
 # Data & Volumes
-data/*.jpg
-data/test_downloads/
-data/videos_longos/*
+data/*
+!data/.gitkeep
 !data/videos_longos/.gitkeep
-data/clips_exportados/*
 !data/clips_exportados/.gitkeep
-data/backups/*
 !data/backups/.gitkeep
-data/*.db
-data/*.db-wal
-data/*.db-shm
+comparacao_rostos/
 
 # Config & Credentials
 .env
@@ -42,21 +37,21 @@ data/*.db-shm
 !.env.example
 client_secret*.json
 *.oauth
-config/cookies.txt
-config/client_secrets.json
-config/youtube_token.json
-config/tiktok_token.json
-config/*_state.json
+config/*
+!config/.gitkeep
+!config/*.example
 
 # Browser Profiles & Authentication Sessions (Playwright/Chrome)
-data/*_browser_profile/
-data/tiktok_browser_profile/
-data/youtube_browser_profile/
+data/*_browser_profile*/
+data/tiktok_browser_profile*/
+data/youtube_browser_profile*/
 
 # Scratch & Temporary Debug Artifacts
 scratch/
 *.jfif
 =
+compactar_disco_docker.bat
+FINALIZAR_MIGRACAO_ADMIN.bat
 
 # Logs
 logs/

@@ -35,6 +35,18 @@ class Settings(BaseSettings):
     # Motor de Corte e Duração Alvo
     CLIP_MIN_DURATION_SECONDS: int = Field(default=50)
     CLIP_MAX_DURATION_SECONDS: int = Field(default=75)
+    CUT_LONG_PAUSES: bool = Field(default=True)
+    PAUSE_THRESHOLD_MS: int = Field(default=400)
+    ENABLE_VIDEO_PACING: bool = Field(default=True)
+    VIDEO_SPEED_FACTOR: float = Field(default=1.05)
+    ENABLE_SEAMLESS_LOOP: bool = Field(default=True)
+    SEAMLESS_LOOP_TRIM_TAIL_SILENCE: bool = Field(default=True)
+    SEAMLESS_LOOP_TAIL_SILENCE_THRESHOLD_DB: int = Field(default=-35)
+    SEAMLESS_LOOP_TAIL_MIN_SILENCE_SEC: float = Field(default=0.20)
+    SEAMLESS_LOOP_FADE_MS: int = Field(default=25)
+    ENABLE_SMART_REFRAME: bool = Field(default=True)
+    REFRAME_MODE: str = Field(default="hybrid")
+    REFRAME_HEADROOM_RATIO: float = Field(default=0.20)
 
     # Limiares de Qualidade e Radar (Filtros desativados para aceitar novos vídeos sem exigir alto VPH)
     RADAR_DISABLE_HYPE_FILTERS: bool = Field(default=True)
@@ -49,8 +61,8 @@ class Settings(BaseSettings):
 
     # Agendamento e Buffer Anti-Spam
     TIMEZONE: str = Field(default="America/Sao_Paulo")
-    POST_INTERVAL_MINUTES: int = Field(default=90)
-    MIN_SAME_VIDEO_INTERVAL_MINUTES: int = Field(default=120)
+    POST_INTERVAL_MINUTES: int = Field(default=15)
+    MIN_SAME_VIDEO_INTERVAL_MINUTES: int = Field(default=15)
     DEFAULT_POSTING_WINDOWS: List[str] = Field(
         default=["09:00", "11:30", "13:30", "15:30", "17:30", "19:30", "21:30"]
     )
@@ -60,7 +72,9 @@ class Settings(BaseSettings):
     DISK_ALERT_THRESHOLD: int = Field(default=75)
     DISK_HARD_THRESHOLD: int = Field(default=85)
     EMERGENCY_CLEANUP_ENABLED: bool = Field(default=True)
-    KEEP_POSTED_CLIPS_HOURS: int = Field(default=48)
+    AUTO_DELETE_POSTED_CLIPS: bool = Field(default=True)
+    AUTO_DELETE_LONG_VIDEOS_ON_COMPLETION: bool = Field(default=True)
+    KEEP_POSTED_CLIPS_HOURS: int = Field(default=0)
 
     # Credenciais YouTube
     YOUTUBE_PUBLISHER_MODE: str = Field(default="api")  # "api" ou "browser"
@@ -92,6 +106,8 @@ class Settings(BaseSettings):
     LLM_TIMEOUT_SECONDS: int = Field(default=120)
     LLM_TEMPERATURE: float = Field(default=0.3)
     LLM_MAX_RETRIES: int = Field(default=2)
+    MAX_COPIES_PER_CYCLE: int = Field(default=12)
+    MAX_PUBLICATIONS_PER_CYCLE: int = Field(default=5)
 
     # Notificações e Webhooks
     DISCORD_WEBHOOK_URL: str = Field(default="")

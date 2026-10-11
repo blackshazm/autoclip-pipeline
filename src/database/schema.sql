@@ -22,9 +22,11 @@ CREATE TABLE IF NOT EXISTS source_channels (
     median_vph REAL DEFAULT 1500.0,
     license_mode TEXT DEFAULT 'owned' CHECK(license_mode IN ('owned', 'licensed', 'authorized', 'third_party_review_required', 'blocked')),
     max_videos_per_cycle INTEGER DEFAULT 3,
+    niche TEXT DEFAULT 'general',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS idx_source_channels_niche ON source_channels(niche);
 
 -- 3. Candidatos Detectados pelo Radar
 CREATE TABLE IF NOT EXISTS radar_candidates (
@@ -137,10 +139,12 @@ CREATE TABLE IF NOT EXISTS publishing_accounts (
     posting_windows TEXT DEFAULT '["11:30","15:00","18:30","21:30"]',
     min_interval_minutes INTEGER DEFAULT 180,
     max_daily_posts INTEGER DEFAULT 6,
+    niche TEXT DEFAULT 'general',
     active INTEGER DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS idx_publishing_accounts_niche ON publishing_accounts(niche);
 
 -- 8. Fila de Publicações Transacionais com Lease Lock
 CREATE TABLE IF NOT EXISTS publications (
@@ -270,6 +274,15 @@ CREATE TABLE IF NOT EXISTS process_signals (
     message TEXT,
     last_updated TEXT,
     extra_json TEXT
+);
+
+-- 17. Controles de Execução e Pausa da Pipeline
+CREATE TABLE IF NOT EXISTS pipeline_controls (
+    service_name TEXT PRIMARY KEY,
+    is_paused INTEGER DEFAULT 0,
+    paused_at TEXT,
+    pause_reason TEXT,
+    updated_at TEXT
 );
 
 -- ========================================================

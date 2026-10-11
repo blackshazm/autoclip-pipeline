@@ -26,6 +26,15 @@ def test_is_file_fully_written(temp_dir):
     # Intervalo reduzido para teste rápido
     assert is_file_fully_written(f, check_interval=0.1) is True
 
+    # Arquivo modificado no passado (idade > 3s) tem retorno imediato sem sleep
+    import os, time
+    past_time = time.time() - 10.0
+    os.utime(f, (past_time, past_time))
+    t0 = time.time()
+    assert is_file_fully_written(f) is True
+    # Garante que não dormiu os 2.5s
+    assert (time.time() - t0) < 0.5
+
 def test_ingest_duplicate_rejection(temp_dir, monkeypatch):
     """Garante que o mesmo arquivo enviado duas vezes não cria registro duplicado."""
     db_file = temp_dir / "ingest_test.db"

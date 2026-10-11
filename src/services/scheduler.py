@@ -4,6 +4,7 @@ Agendador de Publicações com Buffer Anti-Spam, Janelas Horárias e Jitter.
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import hashlib
+import json
 import random
 from typing import List, Optional
 import sqlite3
@@ -51,15 +52,16 @@ def get_next_available_slot(
         if acc_row["posting_windows"]:
             try:
                 windows = json.loads(acc_row["posting_windows"])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Falha ao interpretar posting_windows da conta {account_id}: {e}")
+                windows = None
 
     min_interval = timedelta(minutes=interval_minutes)
 
     cursor.execute("""
         SELECT MAX(scheduled_for) as last_sched
         FROM publications
-        WHERE publishing_account_id = ? AND platform = ? AND status IN ('SCHEDULED', 'UPLOADING', 'POSTED');
+        WHERE publishing_account_id = ? AND platform = ? AND status IN ('SCHEDULED', 'UPLOADING');
     """, (account_id, platform))
     row = cursor.fetchone()
 
@@ -82,14 +84,14 @@ def get_next_available_slot(
             JOIN clips c ON p.clip_id = c.id
             WHERE p.publishing_account_id = ? AND p.platform = ?
               AND c.long_video_id = ?
-              AND p.status IN ('SCHEDULED', 'UPLOADING', 'POSTED');
+              AND p.status IN ('SCHEDULED', 'UPLOADING');
         """, (account_id, platform, long_video_id))
         row_v = cursor.fetchone()
         if row_v and row_v["last_video_sched"]:
             try:
                 clean_v_sched = row_v["last_video_sched"].replace("Z", "+00:00")
                 last_v_dt = datetime.fromisoformat(clean_v_sched).astimezone(tz)
-                min_video_gap = timedelta(minutes=getattr(settings, "MIN_SAME_VIDEO_INTERVAL_MINUTES", 120))
+                min_video_gap = timedelta(minutes=getattr(settings, "MIN_SAME_VIDEO_INTERVAL_MINUTES", 2))
                 if last_v_dt + min_video_gap > base_time:
                     base_time = last_v_dt + min_video_gap
             except Exception:
@@ -98,7 +100,7 @@ def get_next_available_slot(
     # Se não houver janelas definidas na conta, gera janelas contínuas baseadas no intervalo
     if not windows:
         if interval_minutes <= 60:
-            windows = [f"{h:02d}:{m:02d}" for h in range(24) for m in range(0, 60, max(5, interval_minutes))]
+            windows = [f"{h:02d}:{m:02d}" for h in range(24) for m in range(0, 60, max(1, interval_minutes))]
         else:
             windows = sorted(settings.DEFAULT_POSTING_WINDOWS)
     else:
@@ -113,7 +115,7 @@ def get_next_available_slot(
                 hour, minute = map(int, window_str.split(":"))
             except Exception:
                 continue
-            jitter_seconds = random.randint(10, 60) if interval_minutes <= 15 else random.randint(30, 180)
+            jitter_seconds = random.randint(5, 20) if interval_minutes <= 5 else (random.randint(10, 60) if interval_minutes <= 15 else random.randint(30, 180))
             slot = datetime(current_day.year, current_day.month, current_day.day, hour, minute, tzinfo=tz) + timedelta(seconds=jitter_seconds)
 
             if slot >= base_time:
@@ -140,8 +142,8 @@ def schedule_pending_clips() -> int:
             WHERE created_at < ? AND (youtube_status = 'PENDING' OR tiktok_status = 'PENDING');
         """, (cutoff_date.isoformat(),))
 
-        # 2. Busca contas ativas
-        cursor.execute("SELECT id, platform, timezone, max_daily_posts FROM publishing_accounts WHERE active = 1;")
+        # 2. Busca contas ativas com seus respectivos nichos
+        cursor.execute("SELECT id, platform, timezone, max_daily_posts, niche FROM publishing_accounts WHERE active = 1;")
         accounts = cursor.fetchall()
         if not accounts:
             logger.warning("Nenhuma conta de publicação ativa encontrada.")
@@ -149,15 +151,17 @@ def schedule_pending_clips() -> int:
 
         from src.services.overlap_filter import filter_overlapping_clips, filter_against_database, round_robin_interleave
 
-        # 3. Busca clips aprovados com metadados que ainda estão pendentes de envio
+        # 3. Busca clips aprovados com metadados e nicho do canal fonte
         cursor.execute("""
             SELECT c.id, c.clip_uid, c.virality_score, c.title, c.created_at, 
                    c.series_id, c.part_number, c.total_parts,
                    c.long_video_id, c.start_seconds, c.end_seconds, c.duration_seconds,
                    c.youtube_status, c.tiktok_status,
-                   lv.source_channel_id
+                   lv.source_channel_id,
+                   COALESCE(sc.niche, 'general') as clip_niche
             FROM clips c
             LEFT JOIN long_videos lv ON c.long_video_id = lv.id
+            LEFT JOIN source_channels sc ON lv.source_channel_id = sc.id
             WHERE c.virality_score >= ? 
               AND c.moderation_status = 'APPROVED'
               AND c.title IS NOT NULL
@@ -206,23 +210,27 @@ def schedule_pending_clips() -> int:
             clip_id = clip["id"]
             clip_uid = clip["clip_uid"]
             long_vid_id = clip.get("long_video_id")
+            clip_niche = clip.get("clip_niche") or "general"
 
-            for acc in accounts:
+            # Roteamento estrito por nicho: casa nicho do corte com nicho da conta de destino
+            target_accounts = [
+                acc for acc in accounts
+                if acc["niche"] == clip_niche
+            ]
+
+            for acc in target_accounts:
                 acc_id = acc["id"]
                 platform = acc["platform"]
 
-                # Pula se a plataforma já foi postada ou agendada para este clip
-                if platform == "youtube" and clip.get("youtube_status") in ("SCHEDULED", "POSTED", "UPLOADING"):
-                    continue
-                if platform == "tiktok" and clip.get("tiktok_status") in ("SCHEDULED", "POSTED", "UPLOADING"):
+                # Pula se já houver publicação agendada ou enviada para esta conta específica
+                cursor.execute("""
+                    SELECT id FROM publications 
+                    WHERE clip_id = ? AND publishing_account_id = ? AND status IN ('SCHEDULED', 'POSTED', 'UPLOADING');
+                """, (clip_id, acc_id))
+                if cursor.fetchone():
                     continue
 
                 idempotency_key = generate_idempotency_key(clip_uid, platform, acc_id)
-
-                # Verifica se publicação já foi criada
-                cursor.execute("SELECT id FROM publications WHERE idempotency_key = ?;", (idempotency_key,))
-                if cursor.fetchone():
-                    continue
 
                 # Calcula slot com espaçamento anti-repetição por vídeo longo
                 slot_utc = get_next_available_slot(acc_id, platform, conn, long_video_id=long_vid_id)

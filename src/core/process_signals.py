@@ -52,9 +52,11 @@ class SignalTracker:
         "supoclip": "✂️ Supoclip (Cortes)",
         "llm_copywriter": "✍️ Copywriter LLM",
         "scheduler": "⏱️ Agendador",
-        "robot2_publish": "🚀 Robô 2: Publicador",
-        "youtube_publisher": "🔴 YouTube Shorts",
-        "tiktok_publisher": "🎵 TikTok Studio",
+        "media_processor": "🏭 Fábrica de Cortes",
+        "pub_yt_financas": "🔴 YouTube: Raiz do Éden",
+        "pub_yt_fitness": "🔴 YouTube: Fitness",
+        "pub_tk_financas": "🎵 TikTok: Finanças",
+        "pub_tk_fitness": "🎵 TikTok: Fitness",
         "watchdog": "🛡️ Watchdog Guardião"
     }
 
@@ -65,7 +67,8 @@ class SignalTracker:
         task_name: str,
         total_steps: int = 1,
         message: str = "Iniciado",
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        conn: Optional[sqlite3.Connection] = None
     ) -> None:
         """Emite sinal de início de processo ou tarefa."""
         display = cls.NAME_MAP.get(process_name, process_name)
@@ -74,22 +77,28 @@ class SignalTracker:
 
         print(f"{COLOR_BOLD}{COLOR_CYAN}[SINAL: INÍCIO]{COLOR_RESET} {COLOR_BOLD}{display}{COLOR_RESET} » {task_name}: {message}")
 
+        def _do_write(c):
+            c.execute("""
+                INSERT INTO process_signals (
+                    process_name, display_name, task_name, current_step, total_steps, status, message, last_updated, extra_json
+                ) VALUES (?, ?, ?, 0, ?, 'RUNNING', ?, ?, ?)
+                ON CONFLICT(process_name) DO UPDATE SET
+                    display_name = excluded.display_name,
+                    task_name = excluded.task_name,
+                    current_step = 0,
+                    total_steps = excluded.total_steps,
+                    status = 'RUNNING',
+                    message = excluded.message,
+                    last_updated = excluded.last_updated,
+                    extra_json = excluded.extra_json;
+            """, (process_name, display, task_name, total_steps, message, now_iso, extra_str))
+
         try:
-            with get_db() as conn:
-                conn.execute("""
-                    INSERT INTO process_signals (
-                        process_name, display_name, task_name, current_step, total_steps, status, message, last_updated, extra_json
-                    ) VALUES (?, ?, ?, 0, ?, 'RUNNING', ?, ?, ?)
-                    ON CONFLICT(process_name) DO UPDATE SET
-                        display_name = excluded.display_name,
-                        task_name = excluded.task_name,
-                        current_step = 0,
-                        total_steps = excluded.total_steps,
-                        status = 'RUNNING',
-                        message = excluded.message,
-                        last_updated = excluded.last_updated,
-                        extra_json = excluded.extra_json;
-                """, (process_name, display, task_name, total_steps, message, now_iso, extra_str))
+            if conn is not None:
+                _do_write(conn)
+            else:
+                with get_db() as c:
+                    _do_write(c)
         except Exception as e:
             logger.debug(f"Falha ao persistir sinal de início ({process_name}): {e}")
 
@@ -100,7 +109,8 @@ class SignalTracker:
         current_step: int,
         total_steps: int,
         message: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        conn: Optional[sqlite3.Connection] = None
     ) -> None:
         """Emite sinal de progresso com passo e mensagem."""
         display = cls.NAME_MAP.get(process_name, process_name)
@@ -110,18 +120,24 @@ class SignalTracker:
         pct = int((current_step / max(1, total_steps)) * 100)
         print(f"{COLOR_YELLOW}[SINAL: ETAPA {current_step}/{total_steps} ({pct}%)] {COLOR_RESET}{COLOR_BOLD}{display}{COLOR_RESET} » {message}")
 
+        def _do_write(c):
+            c.execute("""
+                UPDATE process_signals
+                SET current_step = ?,
+                    total_steps = ?,
+                    status = 'RUNNING',
+                    message = ?,
+                    last_updated = ?,
+                    extra_json = ?
+                WHERE process_name = ?;
+            """, (current_step, total_steps, message, now_iso, extra_str, process_name))
+
         try:
-            with get_db() as conn:
-                conn.execute("""
-                    UPDATE process_signals
-                    SET current_step = ?,
-                        total_steps = ?,
-                        status = 'RUNNING',
-                        message = ?,
-                        last_updated = ?,
-                        extra_json = ?
-                    WHERE process_name = ?;
-                """, (current_step, total_steps, message, now_iso, extra_str, process_name))
+            if conn is not None:
+                _do_write(conn)
+            else:
+                with get_db() as c:
+                    _do_write(c)
         except Exception as e:
             logger.debug(f"Falha ao persistir sinal de progresso ({process_name}): {e}")
 
@@ -131,12 +147,16 @@ class SignalTracker:
         process_name: str,
         message: str = "Concluído com sucesso",
         success: bool = True,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        conn: Optional[sqlite3.Connection] = None,
+        extra: Optional[Dict[str, Any]] = None,
+        **kwargs
     ) -> None:
         """Emite sinal de término com status e detalhes."""
         display = cls.NAME_MAP.get(process_name, process_name)
         now_iso = datetime.now(timezone.utc).isoformat()
-        extra_str = json.dumps(metadata or {})
+        extra_data = metadata or extra or kwargs or {}
+        extra_str = json.dumps(extra_data)
         status = "COMPLETED" if success else "FAILED"
 
         if success:
@@ -144,16 +164,22 @@ class SignalTracker:
         else:
             print(f"{COLOR_BOLD}{COLOR_RED}[SINAL: FALHOU ❌]{COLOR_RESET} {COLOR_BOLD}{display}{COLOR_RESET} » {message}")
 
+        def _do_write(c):
+            c.execute("""
+                UPDATE process_signals
+                SET status = ?,
+                    message = ?,
+                    last_updated = ?,
+                    extra_json = ?
+                WHERE process_name = ?;
+            """, (status, message, now_iso, extra_str, process_name))
+
         try:
-            with get_db() as conn:
-                conn.execute("""
-                    UPDATE process_signals
-                    SET status = ?,
-                        message = ?,
-                        last_updated = ?,
-                        extra_json = ?
-                    WHERE process_name = ?;
-                """, (status, message, now_iso, extra_str, process_name))
+            if conn is not None:
+                _do_write(conn)
+            else:
+                with get_db() as c:
+                    _do_write(c)
         except Exception as e:
             logger.debug(f"Falha ao persistir sinal de término ({process_name}): {e}")
 

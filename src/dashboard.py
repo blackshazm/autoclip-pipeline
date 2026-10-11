@@ -430,6 +430,30 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         /* TABELAS */
+        .table-scroll-container {
+            max-height: 480px;
+            overflow-y: auto;
+            border-radius: 12px;
+            border: 1px solid var(--card-border);
+            background: rgba(11, 15, 25, 0.7);
+            position: relative;
+        }
+
+        .table-scroll-container::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .table-scroll-container::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+        .table-scroll-container::-webkit-scrollbar-thumb {
+            background: rgba(99, 102, 241, 0.4);
+            border-radius: 4px;
+        }
+        .table-scroll-container::-webkit-scrollbar-thumb:hover {
+            background: rgba(99, 102, 241, 0.7);
+        }
+
         .table-custom {
             width: 100%;
             border-collapse: collapse;
@@ -437,6 +461,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         .table-custom th {
+            position: sticky;
+            top: 0;
+            background: #0d1322;
+            z-index: 3;
             text-align: left;
             padding: 12px 14px;
             color: var(--text-muted);
@@ -445,6 +473,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             font-size: 11.5px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            box-shadow: 0 1px 0 var(--card-border);
         }
 
         .table-custom td {
@@ -456,6 +485,166 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         .table-custom tr:hover td {
             background: rgba(255, 255, 255, 0.02);
+        }
+
+        /* TOOLBAR DA TABELA DE PUBLICAÇÕES */
+        .pub-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 14px;
+        }
+
+        .pub-tabs {
+            display: flex;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.03);
+            padding: 4px;
+            border-radius: 10px;
+            border: 1px solid var(--card-border);
+        }
+
+        .pub-tab-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-muted);
+            padding: 6px 14px;
+            border-radius: 7px;
+            font-size: 12.5px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .pub-tab-btn:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .pub-tab-btn .tab-badge {
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .pub-tab-btn.active {
+            background: rgba(99, 102, 241, 0.2);
+            color: #fff;
+            border: 1px solid rgba(99, 102, 241, 0.4);
+        }
+
+        .pub-tab-btn.active .tab-badge {
+            background: var(--primary);
+            color: #fff;
+        }
+
+        .pub-filters-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .search-box {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .search-input {
+            background: rgba(11, 15, 25, 0.85);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 7px 12px 7px 32px;
+            font-size: 12.5px;
+            color: #fff;
+            outline: none;
+            width: 220px;
+            transition: all 0.2s ease;
+        }
+
+        .search-input:focus {
+            border-color: var(--primary);
+            width: 270px;
+            box-shadow: 0 0 10px rgba(99, 102, 241, 0.25);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 10px;
+            font-size: 12px;
+            color: var(--text-dim);
+            pointer-events: none;
+        }
+
+        .plat-select {
+            background: rgba(11, 15, 25, 0.85);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 7px 10px;
+            font-size: 12px;
+            color: #cbd5e1;
+            outline: none;
+            cursor: pointer;
+        }
+
+        /* BARRA DE PAGINAÇÃO */
+        .pagination-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 14px;
+            background: rgba(11, 15, 25, 0.6);
+            border-top: 1px solid var(--card-border);
+            border-radius: 0 0 12px 12px;
+            font-size: 12px;
+            color: var(--text-muted);
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .pagination-controls {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .page-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
+            color: var(--text-main);
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .page-btn:hover:not(:disabled) {
+            background: rgba(99, 102, 241, 0.2);
+            border-color: var(--primary);
+            color: #fff;
+        }
+
+        .page-btn:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+
+        .page-info {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11.5px;
+            padding: 0 6px;
+            color: #cbd5e1;
         }
 
         .tag-pill {
@@ -721,6 +910,165 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             70% { box-shadow: 0 0 0 6px rgba(6, 182, 212, 0); }
             100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0); }
         }
+
+        .signal-badge.paused {
+            background: rgba(245, 158, 11, 0.18);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            animation: pulse-border-amber 2s infinite;
+        }
+
+        @keyframes pulse-border-amber {
+            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+            70% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+        }
+
+        /* ROBOT CONTROLS & RAM SHIELD */
+        .robot-controls-card {
+            background: linear-gradient(135deg, rgba(17, 24, 39, 0.85) 0%, rgba(13, 18, 31, 0.95) 100%);
+            border: 1px solid rgba(99, 102, 241, 0.25);
+            backdrop-filter: blur(16px);
+            border-radius: 16px;
+            padding: 18px 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .robot-controls-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-bottom: 16px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .ram-telemetry-box {
+            background: rgba(13, 18, 31, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 10px 14px;
+            display: flex;
+            flex-direction: column;
+            min-width: 260px;
+        }
+
+        .robot-buttons-row {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .btn-robot-master {
+            border: none;
+            border-radius: 10px;
+            padding: 10px 18px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-robot-master.running {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.3));
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+        .btn-robot-master.running:hover {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.35), rgba(220, 38, 38, 0.5));
+            box-shadow: 0 0 16px rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-robot-master.paused {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: #ffffff;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+        }
+        .btn-robot-master.paused:hover {
+            filter: brightness(1.1);
+            box-shadow: 0 0 18px rgba(16, 185, 129, 0.5);
+        }
+
+        .robot-individual-group {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .btn-robot-pill {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+            border-radius: 10px;
+            padding: 8px 14px;
+            font-size: 12.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-robot-pill:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-robot-pill.is-paused {
+            background: rgba(245, 158, 11, 0.12);
+            border-color: rgba(245, 158, 11, 0.4);
+            color: #fbbf24;
+        }
+
+        .btn-robot-pill.is-paused .dot-status {
+            background: #f59e0b;
+            box-shadow: 0 0 8px #f59e0b;
+        }
+
+        .btn-robot-pill:not(.is-paused) .dot-status {
+            background: #10b981;
+            box-shadow: 0 0 8px #10b981;
+        }
+
+        .dot-status {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .btn-robot-action {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.08);
+            margin-left: 2px;
+        }
+
+        .btn-highlight-copy {
+            border-color: rgba(236, 72, 153, 0.35);
+        }
+
+        .ram-save-tag {
+            font-size: 9.5px;
+            font-weight: 800;
+            text-transform: uppercase;
+            background: linear-gradient(135deg, #ec4899, #8b5cf6);
+            color: #fff;
+            padding: 1px 5px;
+            border-radius: 4px;
+            letter-spacing: 0.3px;
+        }
     </style>
 </head>
 <body>
@@ -743,11 +1091,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <!-- BANNER DE STATUS OPERACIONAL -->
     {{STATUS_ALERT_BANNER}}
 
+    <!-- PAINEL DE ESTOQUE POR NICHO & DOWNLOAD QUALIFICADOS -->
+    {{MEDIA_STOCK_PANEL}}
+
     <!-- HERO CARD: PRÓXIMO DISPARO DO YOUTUBE -->
     {{NEXT_PUBLICATION_HERO}}
 
     <!-- CONTROLE DE FREQUÊNCIA DE POSTAGEM -->
     {{POST_INTERVAL_CONTROL}}
+
+    <!-- CONTROLE DE ROBÔS & ESCUDO DE MEMÓRIA RAM -->
+    {{ROBOT_CONTROLS_AND_RAM_PANEL}}
 
     <!-- ESTEIRA DE PROCESSOS EM TEMPO REAL (SINAIS DE CICLO E ETAPAS) -->
     {{PROCESS_SIGNALS_PANEL}}
@@ -788,36 +1142,74 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div>
             <!-- FILA DE PUBLICAÇÕES -->
             <div class="section-box">
-                <div class="section-box-header">
-                    <h2>📅 Fila de Publicações (YouTube Shorts & TikTok)</h2>
-                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                        <div class="table-filters">
-                            <button class="filter-btn active" onclick="filterPublications('all', this)">Todos</button>
-                            <button class="filter-btn" onclick="filterPublications('scheduled', this)">Agendados</button>
-                            <button class="filter-btn" onclick="filterPublications('posted', this)">Publicados</button>
-                            <button class="filter-btn" onclick="filterPublications('failed', this)">Falhas</button>
-                        </div>
-                        <button class="btn-secondary btn-danger" onclick="retryAllFailed()" title="Reenfileirar todas as postagens com erro">
-                            🔄 Re-tentar Falhas
+                <div class="section-box-header" style="margin-bottom: 14px;">
+                    <h2>📅 Central de Publicações (Shorts & TikTok)</h2>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <button class="btn-secondary btn-danger" onclick="retryAllFailed()" title="Reenfileirar todas as postagens com erro" id="btnRetryAllTop" style="display: {{FAILED_RETRY_DISPLAY}};">
+                            🔄 Re-tentar {{TOTAL_FAILED}} Falhas
                         </button>
                     </div>
                 </div>
 
-                <div style="overflow-x: auto;">
+                <!-- TOOLBAR COM ABAS, BUSCA E FILTROS -->
+                <div class="pub-toolbar">
+                    <div class="pub-tabs">
+                        <button class="pub-tab-btn active" id="tabBtnScheduled" onclick="switchPubTab('scheduled', this)">
+                            <span>🎯 Fila Ativa</span>
+                            <span class="tab-badge">{{ACTIVE_QUEUE_COUNT}}</span>
+                        </button>
+                        <button class="pub-tab-btn" id="tabBtnPosted" onclick="switchPubTab('posted', this)">
+                            <span>✅ Histórico Postado</span>
+                            <span class="tab-badge">{{POSTED_COUNT}}</span>
+                        </button>
+                        <button class="pub-tab-btn" id="tabBtnFailed" onclick="switchPubTab('failed', this)">
+                            <span>⚠️ Falhas</span>
+                            <span class="tab-badge">{{FAILED_COUNT}}</span>
+                        </button>
+                        <button class="pub-tab-btn" id="tabBtnAll" onclick="switchPubTab('all', this)">
+                            <span>🌐 Ver Todos</span>
+                            <span class="tab-badge">{{TOTAL_PUBS_COUNT}}</span>
+                        </button>
+                    </div>
+
+                    <div class="pub-filters-right">
+                        <div class="search-box">
+                            <span class="search-icon">🔍</span>
+                            <input type="text" id="pubSearchInput" class="search-input" placeholder="Buscar título ou corte..." oninput="handlePubSearch()">
+                        </div>
+                        <select id="pubPlatformSelect" class="plat-select" onchange="handlePubPlatformChange()">
+                            <option value="all">Todas as Redes</option>
+                            <option value="youtube">🔴 YouTube Shorts</option>
+                            <option value="tiktok">🎵 TikTok</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="table-scroll-container">
                     <table class="table-custom" id="publicationsTable">
                         <thead>
                             <tr>
-                                <th>Plataforma</th>
-                                <th>Título / Corte</th>
-                                <th>Status</th>
-                                <th>Horário</th>
-                                <th style="text-align: right;">Ação</th>
+                                <th style="width: 80px;">Rede</th>
+                                <th>Título do Corte</th>
+                                <th style="width: 140px;">Status</th>
+                                <th style="width: 130px;">Agendado / Postado</th>
+                                <th style="text-align: right; width: 130px;">Ação</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="publicationsTbody">
                             {{PUBLICATIONS_ROWS}}
                         </tbody>
                     </table>
+                </div>
+
+                <!-- BARRA DE PAGINAÇÃO -->
+                <div class="pagination-bar" id="pubPaginationBar">
+                    <div id="pubPageSummary">Mostrando registros...</div>
+                    <div class="pagination-controls">
+                        <button class="page-btn" id="btnPagePrev" onclick="changePubPage(-1)">◀ Anterior</button>
+                        <span class="page-info" id="pubPageIndicator">Pág 1 de 1</span>
+                        <button class="page-btn" id="btnPageNext" onclick="changePubPage(1)">Próxima ▶</button>
+                    </div>
                 </div>
             </div>
 
@@ -949,20 +1341,123 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
         }, 1000);
 
-        // 2. Filtros na Tabela de Publicações
-        function filterPublications(status, btn) {
-            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            const rows = document.querySelectorAll('#publicationsTable tbody tr');
-            rows.forEach(r => {
+        // 2. Motor de Filtragem, Abas, Busca e Paginação da Tabela de Publicações
+        let currentPubTab = 'scheduled'; // Padrão: Fila Ativa (scheduled + uploading)
+        let currentPubPlatform = 'all';
+        let currentPubSearch = '';
+        let currentPubPage = 1;
+        const PUB_PAGE_SIZE = 15;
+
+        function getVisibleRows() {
+            const rows = Array.from(document.querySelectorAll('#publicationsTbody tr'));
+            return rows.filter(r => {
                 const rowStatus = r.getAttribute('data-status') || '';
-                if (status === 'all' || rowStatus === status) {
-                    r.style.display = '';
-                } else {
-                    r.style.display = 'none';
+                const rowPlatform = r.getAttribute('data-platform') || '';
+                const rowSearch = (r.getAttribute('data-search') || '').toLowerCase();
+
+                // 1. Filtro de Aba Operacional
+                let matchTab = false;
+                if (currentPubTab === 'all') {
+                    matchTab = true;
+                } else if (currentPubTab === 'scheduled') {
+                    matchTab = (rowStatus === 'scheduled' || rowStatus === 'uploading');
+                } else if (currentPubTab === 'posted') {
+                    matchTab = (rowStatus === 'posted');
+                } else if (currentPubTab === 'failed') {
+                    matchTab = (rowStatus === 'failed');
                 }
+
+                if (!matchTab) return false;
+
+                // 2. Filtro de Plataforma
+                if (currentPubPlatform !== 'all' && rowPlatform !== currentPubPlatform) {
+                    return false;
+                }
+
+                // 3. Filtro de Busca Instantânea
+                if (currentPubSearch && !rowSearch.includes(currentPubSearch)) {
+                    return false;
+                }
+
+                return true;
             });
         }
+
+        function renderPublicationsTable() {
+            const allRows = Array.from(document.querySelectorAll('#publicationsTbody tr'));
+            const matchedRows = getVisibleRows();
+            const totalMatched = matchedRows.length;
+            const totalPages = Math.max(1, Math.ceil(totalMatched / PUB_PAGE_SIZE));
+
+            if (currentPubPage > totalPages) currentPubPage = totalPages;
+            if (currentPubPage < 1) currentPubPage = 1;
+
+            const startIdx = (currentPubPage - 1) * PUB_PAGE_SIZE;
+            const endIdx = startIdx + PUB_PAGE_SIZE;
+
+            // Esconde todas as linhas e exibe apenas o slice da página atual
+            allRows.forEach(r => r.style.display = 'none');
+            matchedRows.slice(startIdx, endIdx).forEach(r => r.style.display = '');
+
+            // Atualiza indicadores da barra de paginação
+            const pageSummary = document.getElementById('pubPageSummary');
+            const pageIndicator = document.getElementById('pubPageIndicator');
+            const btnPrev = document.getElementById('btnPagePrev');
+            const btnNext = document.getElementById('btnPageNext');
+
+            if (pageSummary) {
+                if (totalMatched === 0) {
+                    pageSummary.innerText = 'Nenhuma publicação encontrada para os filtros selecionados';
+                } else {
+                    const startCount = startIdx + 1;
+                    const endCount = Math.min(endIdx, totalMatched);
+                    pageSummary.innerText = `Mostrando ${startCount} - ${endCount} de ${totalMatched} publicações`;
+                }
+            }
+
+            if (pageIndicator) {
+                pageIndicator.innerText = `Pág ${currentPubPage} de ${totalPages}`;
+            }
+
+            if (btnPrev) btnPrev.disabled = (currentPubPage <= 1);
+            if (btnNext) btnNext.disabled = (currentPubPage >= totalPages);
+        }
+
+        function switchPubTab(tab, btn) {
+            document.querySelectorAll('.pub-tab-btn').forEach(b => b.classList.remove('active'));
+            if (btn) btn.classList.add('active');
+            currentPubTab = tab;
+            currentPubPage = 1;
+            renderPublicationsTable();
+        }
+
+        function handlePubPlatformChange() {
+            const sel = document.getElementById('pubPlatformSelect');
+            if (sel) currentPubPlatform = sel.value;
+            currentPubPage = 1;
+            renderPublicationsTable();
+        }
+
+        let searchDebounceTimer = null;
+        function handlePubSearch() {
+            clearTimeout(searchDebounceTimer);
+            searchDebounceTimer = setTimeout(() => {
+                const inp = document.getElementById('pubSearchInput');
+                currentPubSearch = (inp ? inp.value.trim().toLowerCase() : '');
+                currentPubPage = 1;
+                renderPublicationsTable();
+            }, 150);
+        }
+
+        function changePubPage(delta) {
+            currentPubPage += delta;
+            renderPublicationsTable();
+            const container = document.querySelector('.table-scroll-container');
+            if (container) container.scrollTop = 0;
+        }
+
+        // Garante renderização inicial
+        setTimeout(renderPublicationsTable, 50);
 
         // 3. Ações Rápidas: Publicar Agora
         async function publishNow(pubId) {
@@ -995,6 +1490,33 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 }
             } catch(e) {
                 alert('Erro de conexão: ' + e);
+            }
+        // 4.5. Ações Rápidas: Forçar Download de Candidatos do Radar
+        async function triggerRadarDownload() {
+            const btn = event ? event.target : null;
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = '⏳ Baixando candidatos...';
+            }
+            try {
+                const res = await fetch('/api/radar/trigger_download', { method: 'POST' });
+                const data = await res.json();
+                if (data.ok) {
+                    alert('📥 Sucesso! ' + data.downloaded + ' vídeos qualificados foram baixados e enviados para o pipeline.');
+                    window.location.reload();
+                } else {
+                    alert('❌ Erro: ' + (data.error || 'Desconhecido'));
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerText = '📥 Forçar Download de Candidatos';
+                    }
+                }
+            } catch(e) {
+                alert('Erro de conexão: ' + e);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerText = '📥 Forçar Download de Candidatos';
+                }
             }
         }
 
@@ -1129,6 +1651,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         if (s.status === 'RUNNING') badgeLabel = `EM EXECUÇÃO (${pct}%)`;
                         else if (s.status === 'COMPLETED') badgeLabel = 'CONCLUÍDO';
                         else if (s.status === 'FAILED') badgeLabel = 'FALHOU';
+                        else if (s.status === 'PAUSED') badgeLabel = 'PAUSADO';
 
                         const timeFormatted = s.last_updated ? s.last_updated.replace('T', ' ').substring(11, 19) : '--:--:--';
                         const extraLink = s.extra && s.extra.video_id ? `<a href="https://youtube.com/shorts/${s.extra.video_id}" target="_blank" style="color: #38bdf8; font-size: 11px; text-decoration: underline; margin-left: 6px;">▶️ Link Real</a>` : '';
@@ -1155,8 +1678,109 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 console.error("Erro ao sincronizar sinais:", e);
             }
         }
+
+        // --- CONTROLE DE PAUSA DOS ROBÔS E TELEMETRIA DE RAM ---
+        async function toggleRobot(service) {
+            try {
+                const res = await fetch(`/api/robots/toggle?service=${encodeURIComponent(service)}`, {
+                    method: 'POST'
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    updateRobotsUI(data);
+                    fetchLiveSignals();
+                } else {
+                    alert('Erro ao alterar status do robô: ' + (data.error || 'Desconhecido'));
+                }
+            } catch(e) {
+                console.error('Erro de conexão:', e);
+            }
+        }
+
+        async function toggleAllRobots() {
+            try {
+                const btn = document.getElementById('btnToggleAll');
+                const isPaused = btn && btn.classList.contains('paused');
+                const endpoint = isPaused ? '/api/robots/resume_all' : '/api/robots/pause_all';
+                const res = await fetch(endpoint, { method: 'POST' });
+                const data = await res.json();
+                if (data.ok) {
+                    updateRobotsUI(data);
+                    fetchLiveSignals();
+                }
+            } catch(e) {
+                console.error('Erro ao alternar todos:', e);
+            }
+        }
+
+        function updateRobotsUI(data) {
+            if (!data || !data.controls) return;
+            const ctrl = data.controls;
+
+            // Atualiza Botão Mestre
+            const btnAll = document.getElementById('btnToggleAll');
+            if (btnAll) {
+                if (data.all_paused) {
+                    btnAll.className = 'btn-robot-master paused';
+                    btnAll.innerHTML = '▶️ Retomar Toda a Esteira';
+                } else {
+                    btnAll.className = 'btn-robot-master running';
+                    btnAll.innerHTML = '🛑 Pausar Toda a Esteira';
+                }
+            }
+
+            // Atualiza Botões Individuais
+            const updatePill = (elemId, isPsd) => {
+                const el = document.getElementById(elemId);
+                if (!el) return;
+                const act = el.querySelector('.btn-robot-action');
+                if (isPsd) {
+                    el.classList.add('is-paused');
+                    if (act) act.innerText = '▶️ Retomar';
+                } else {
+                    el.classList.remove('is-paused');
+                    if (act) act.innerText = '⏸️ Pausar';
+                }
+            };
+
+            if (ctrl.radar_youtube) updatePill('btnRobotRadar', ctrl.radar_youtube.is_paused);
+            if (ctrl.robot1_ingest) updatePill('btnRobotR1', ctrl.robot1_ingest.is_paused);
+            if (ctrl.llm_copywriter) updatePill('btnRobotCopy', ctrl.llm_copywriter.is_paused);
+            if (ctrl.robot2_publish) updatePill('btnRobotR2', ctrl.robot2_publish.is_paused);
+
+            // Telemetria de RAM
+            if (data.system_memory && data.system_memory.available) {
+                const mem = data.system_memory;
+                const txt = document.getElementById('ramUsageText');
+                const bar = document.getElementById('ramBarFill');
+                if (txt) txt.innerText = `${mem.percent}% (${mem.used_gb} GB / ${mem.total_gb} GB)`;
+                if (bar) {
+                    bar.style.width = `${mem.percent}%`;
+                    bar.style.background = mem.percent < 75 ? '#10b981' : (mem.percent < 85 ? '#f59e0b' : '#ef4444');
+                }
+            }
+
+            // Alerta RAM Shield
+            const shieldBadge = document.getElementById('ramShieldBadge');
+            if (shieldBadge) {
+                shieldBadge.style.display = data.clip_cutting_active ? 'block' : 'none';
+            }
+        }
+
+        async function fetchLiveRobotsStatus() {
+            try {
+                const res = await fetch('/api/robots/status');
+                const data = await res.json();
+                if (data.ok) {
+                    updateRobotsUI(data);
+                }
+            } catch(e) {}
+        }
+
         setInterval(fetchLiveSignals, 3500);
+        setInterval(fetchLiveRobotsStatus, 3500);
         setTimeout(fetchLiveSignals, 600);
+        setTimeout(fetchLiveRobotsStatus, 800);
     </script>
 </body>
 </html>
@@ -1233,6 +1857,13 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
             from src.core.process_signals import SignalTracker
             signals = SignalTracker.get_all_signals()
             self._send_json({"ok": True, "signals": signals})
+            return
+
+        # Rota de API: Status dos Robôs e Telemetria de RAM
+        if path == "/api/robots/status":
+            from src.core.pipeline_control import PipelineController
+            statuses = PipelineController.get_all_statuses()
+            self._send_json({"ok": True, **statuses})
             return
 
         # Rota principal: Dashboard HTML
@@ -1379,6 +2010,42 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
 
         from src.services.channel_manager import add_source_channel, delete_source_channel, toggle_channel_status
 
+        # 0. Controle de Robôs e Pausa
+        if path == "/api/robots/toggle":
+            from src.core.pipeline_control import PipelineController
+            query = urllib.parse.parse_qs(parsed.query)
+            service = query.get("service", [None])[0]
+            if not service:
+                try:
+                    content_length = int(self.headers.get("Content-Length", 0))
+                    if content_length > 0:
+                        body = self.rfile.read(content_length).decode("utf-8")
+                        data = json.loads(body)
+                        service = data.get("service")
+                except Exception:
+                    pass
+            if service:
+                new_state = PipelineController.toggle_pause(service, reason="dashboard_toggle")
+                statuses = PipelineController.get_all_statuses()
+                self._send_json({"ok": True, "service": service, "is_paused": new_state, **statuses})
+            else:
+                self._send_json({"ok": False, "error": "Serviço ausente"}, status=400)
+            return
+
+        if path == "/api/robots/pause_all":
+            from src.core.pipeline_control import PipelineController
+            PipelineController.pause_all(reason="dashboard_button")
+            statuses = PipelineController.get_all_statuses()
+            self._send_json({"ok": True, **statuses})
+            return
+
+        if path == "/api/robots/resume_all":
+            from src.core.pipeline_control import PipelineController
+            PipelineController.resume_all()
+            statuses = PipelineController.get_all_statuses()
+            self._send_json({"ok": True, **statuses})
+            return
+
         # 1. Antecipar publicação para disparo agora
         if path == "/api/publications/publish_now":
             query = urllib.parse.parse_qs(parsed.query)
@@ -1442,6 +2109,16 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
         # 4. Reagendar Toda a Fila com Início Imediato a partir de Agora
         if path == "/api/settings/reschedule_immediate":
             self._handle_reschedule_immediate()
+            return
+
+        # 4.5. Forçar Download de Candidatos Qualificados do Radar
+        if path == "/api/radar/trigger_download":
+            try:
+                from src.radar_youtube import download_pending_qualified_candidates
+                downloaded = download_pending_qualified_candidates(downloads_count=0, max_downloads=3, dry_run=False)
+                self._send_json({"ok": True, "downloaded": downloaded})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, status=500)
             return
 
         # 3. Gerenciamento de Canais
@@ -1592,25 +2269,43 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 """
 
             # 3. Tabela de Publicações com Links Diretos e Filtros
+            # Ordenação inteligente:
+            # - Itens ativos (agendados, enviando, falhas) ordenados cronologicamente (scheduled_for ASC)
+            # - Itens já postados (POSTED) ordenados do mais recente para o mais antigo (scheduled_for DESC)
             cursor.execute("""
                 SELECT p.id, p.platform, c.clip_uid, c.title, p.status, p.scheduled_for, p.external_id, p.error_message
                 FROM publications p
                 JOIN clips c ON p.clip_id = c.id
-                ORDER BY p.scheduled_for ASC;
+                ORDER BY 
+                    CASE WHEN p.status = 'POSTED' THEN 1 ELSE 0 END ASC,
+                    CASE WHEN p.status = 'POSTED' THEN p.scheduled_for END DESC,
+                    p.scheduled_for ASC;
             """)
             pubs = cursor.fetchall()
 
             pubs_html = ""
             failed_count = 0
+            active_queue_count = 0
+            posted_count = 0
+
             for p in pubs:
                 st = p["status"]
                 err = p["error_message"] or ""
                 ext_id = p["external_id"] or ""
 
-                # Filtro class
+                # Contadores e classes de filtro
                 f_class = "scheduled"
-                if st == "POSTED": f_class = "posted"
-                elif st == "FAILED": f_class = "failed"
+                if st == "POSTED":
+                    f_class = "posted"
+                    posted_count += 1
+                elif st == "FAILED":
+                    f_class = "failed"
+                    failed_count += 1
+                elif st in ("SCHEDULED", "UPLOADING", "RECONCILING"):
+                    f_class = "scheduled"
+                    active_queue_count += 1
+                else:
+                    f_class = "other"
 
                 # Horário formatado
                 sched_str = p["scheduled_for"] or "Imediato"
@@ -1622,14 +2317,18 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 except Exception:
                     pass
 
-                title_disp = p["title"] or p["clip_uid"]
+                raw_title = p["title"] or p["clip_uid"]
+                title_disp = raw_title
                 if len(title_disp) > 42:
                     title_disp = title_disp[:42] + "..."
+
+                title_attr = raw_title.replace('"', '&quot;')
+                search_terms = f"{raw_title} {p['clip_uid']} {p['platform']} {st} {ext_id}".replace('"', '').replace("'", "").lower()
 
                 pub_id = p["id"]
                 action_html = ""
                 if st == "POSTED":
-                    pill = '<span class="tag-pill" style="background: rgba(160, 185, 129, 0.15); color: #34d399;">✅ PUBLICADO</span>'
+                    pill = '<span class="tag-pill" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">✅ PUBLICADO</span>'
                     if p["platform"] == "youtube" and ext_id:
                         yt_link = f"https://youtube.com/shorts/{ext_id}"
                         action_html = f'<a href="{yt_link}" target="_blank" class="btn-secondary btn-success">▶️ Abrir Short</a>'
@@ -1639,7 +2338,6 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                     pill = '<span class="tag-pill" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; font-weight:700;">🚀 ENVIANDO...</span>'
                     action_html = '<span style="font-size: 12px; color: #a855f7;">Em andamento</span>'
                 elif st == "FAILED":
-                    failed_count += 1
                     err_clean = err.replace('"', '&quot;')
                     pill = f'<span class="tag-pill" style="background: rgba(239, 68, 68, 0.2); color: #f87171; cursor:pointer;" title="{err_clean}">❌ FALHOU</span>'
                     action_html = f'<button onclick="publishNow({pub_id})" class="btn-secondary btn-danger">🔄 Re-tentar</button>'
@@ -1650,9 +2348,9 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 platform_icon = "🔴 YT" if p["platform"] == "youtube" else "🎵 TT"
 
                 pubs_html += f"""
-                <tr data-status="{f_class}">
+                <tr data-status="{f_class}" data-platform="{p['platform']}" data-search="{search_terms}">
                     <td><strong>{platform_icon}</strong></td>
-                    <td title="{p['title'] or p['clip_uid']}">{title_disp}</td>
+                    <td title="{title_attr}">{title_disp}</td>
                     <td>{pill}</td>
                     <td style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #f8fafc;">{sched_str}</td>
                     <td style="text-align: right;">{action_html}</td>
@@ -1734,11 +2432,89 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 14px; padding: 14px 22px; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between;">
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <span style="font-size: 18px;">✅</span>
-                        <span style="color: #34d399; font-size: 13.5px; font-weight: 600;">Todos os robôs (Radar, Ingestor, Publicador) estão 100% operacionais e sem erros ativos.</span>
+                        <span style="color: #34d399; font-size: 13.5px; font-weight: 600;">Todos os robôs da esteira estão 100% operacionais e sem erros ativos.</span>
                     </div>
                     <span style="color: var(--text-muted); font-size: 12px; font-family: 'JetBrains Mono', monospace;">ESTEIRA DETERMINÍSTICA</span>
                 </div>
                 """
+
+            # 5.5. Estoque de Mídia & Fila por Nicho
+            cursor.execute("""
+                SELECT 
+                    pa.niche,
+                    SUM(CASE WHEN p.status = 'SCHEDULED' THEN 1 ELSE 0 END) as scheduled_count,
+                    SUM(CASE WHEN p.status = 'POSTED' THEN 1 ELSE 0 END) as posted_count
+                FROM publications p
+                JOIN publishing_accounts pa ON p.publishing_account_id = pa.id
+                GROUP BY pa.niche;
+            """)
+            niche_stock = {r["niche"]: dict(r) for r in cursor.fetchall()}
+
+            cursor.execute("""
+                SELECT 
+                    sc.niche,
+                    COUNT(*) as qual_count
+                FROM radar_candidates rc
+                JOIN source_channels sc ON rc.source_channel_id = sc.id
+                WHERE rc.status = 'QUALIFIED' 
+                  AND (rc.downloaded_at IS NULL OR rc.downloaded_at = '')
+                  AND rc.youtube_id NOT IN (SELECT youtube_id FROM long_videos WHERE youtube_id IS NOT NULL)
+                GROUP BY sc.niche;
+            """)
+            radar_qual = {r["niche"]: r["qual_count"] for r in cursor.fetchall()}
+
+            fin_ready = (niche_stock.get("financas") or {}).get("scheduled_count") or 0
+            fin_posted = (niche_stock.get("financas") or {}).get("posted_count") or 0
+            fin_radar = radar_qual.get("financas", 0)
+
+            fit_ready = (niche_stock.get("fitness") or {}).get("scheduled_count") or 0
+            fit_posted = (niche_stock.get("fitness") or {}).get("posted_count") or 0
+            fit_radar = radar_qual.get("fitness", 0)
+
+            total_qual_radar = fin_radar + fit_radar
+
+            stock_panel_html = f"""
+            <div style="background: rgba(17, 24, 39, 0.75); border: 1px solid var(--card-border); border-radius: 16px; padding: 20px 24px; margin-bottom: 24px; box-shadow: 0 8px 24px rgba(0,0,0,0.3);">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-bottom: 16px;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <div style="width: 40px; height: 40px; border-radius: 10px; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); display: flex; align-items: center; justify-content: center; font-size: 20px;">📦</div>
+                        <div>
+                            <h3 style="font-size: 16px; font-weight: 700; color: #fff;">Estoque de Mídia & Fila por Canal / Nicho</h3>
+                            <p style="font-size: 13px; color: var(--text-muted); margin-top: 2px;">Cortes prontos para postagem contínua e novos episódios qualificados no Radar.</p>
+                        </div>
+                    </div>
+                    <button class="btn-action" style="background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);" onclick="triggerRadarDownload()">
+                        📥 Forçar Download de Candidatos ({total_qual_radar} no Radar)
+                    </button>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+                    <!-- Card Finanças -->
+                    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 12px; padding: 16px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                            <strong style="color: #38bdf8; font-size: 14px;">💰 Nicho Finanças (Raiz do Éden)</strong>
+                            <span class="tag-pill" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">Canal Oficial</span>
+                        </div>
+                        <div style="display: flex; gap: 16px; font-size: 13px;">
+                            <div>Prontos na Fila: <strong style="color: {'#10b981' if fin_ready > 0 else '#f59e0b'};">{fin_ready}</strong></div>
+                            <div>Postados: <strong style="color: #fff;">{fin_posted}</strong></div>
+                            <div>Qualificados no Radar: <strong style="color: #a5b4fc;">{fin_radar}</strong></div>
+                        </div>
+                    </div>
+                    <!-- Card Fitness -->
+                    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 12px; padding: 16px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                            <strong style="color: #ec4899; font-size: 14px;">💪 Nicho Fitness (Canal Dedicado)</strong>
+                            <span class="tag-pill" style="background: rgba(236, 72, 153, 0.15); color: #ec4899;">Canal Dedicado</span>
+                        </div>
+                        <div style="display: flex; gap: 16px; font-size: 13px;">
+                            <div>Prontos na Fila: <strong style="color: {'#10b981' if fit_ready > 0 else '#f59e0b'};">{fit_ready}</strong></div>
+                            <div>Postados: <strong style="color: #fff;">{fit_posted}</strong></div>
+                            <div>Qualificados no Radar: <strong style="color: #a5b4fc;">{fit_radar}</strong></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """
 
             # 6. Canais Monitorados pelo Radar
             cursor.execute("SELECT id, name, youtube_channel_id, active, vph_absolute_threshold FROM source_channels ORDER BY active DESC, id ASC;")
@@ -1823,6 +2599,147 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
             </div>
             """
 
+            # 8.5. Painel de Controle de Robôs & Escudo de Memória RAM
+            from src.core.pipeline_control import PipelineController
+            ctrl_status = PipelineController.get_all_statuses()
+            c_all = ctrl_status["controls"].get("all", {})
+            c_radar = ctrl_status["controls"].get("radar_youtube", {})
+            c_r1 = ctrl_status["controls"].get("robot1_ingest", {})
+            c_media = ctrl_status["controls"].get("media_processor", {})
+            c_yt_fin = ctrl_status["controls"].get("pub_yt_financas", {})
+            c_yt_fit = ctrl_status["controls"].get("pub_yt_fitness", {})
+            c_tk_fin = ctrl_status["controls"].get("pub_tk_financas", {})
+            c_tk_fit = ctrl_status["controls"].get("pub_tk_fitness", {})
+            c_copy = ctrl_status["controls"].get("llm_copywriter", {})
+
+            mem = ctrl_status["system_memory"]
+            ram_pct = mem["percent"]
+            ram_used = mem["used_gb"]
+            ram_total = mem["total_gb"]
+            ram_color = "#10b981" if ram_pct < 75 else ("#f59e0b" if ram_pct < 85 else "#ef4444")
+            clip_active = ctrl_status["clip_cutting_active"]
+            shield_disp = "block" if clip_active else "none"
+
+            all_paused = ctrl_status["all_paused"]
+            btn_all_label = "▶️ Retomar Toda a Esteira" if all_paused else "🛑 Pausar Toda a Esteira"
+            btn_all_cls = "paused" if all_paused else "running"
+
+            radar_paused = c_radar.get("is_paused", False)
+            r1_paused = c_r1.get("is_paused", False)
+            media_paused = c_media.get("is_paused", False)
+            yt_fin_paused = c_yt_fin.get("is_paused", False)
+            yt_fit_paused = c_yt_fit.get("is_paused", False)
+            tk_fin_paused = c_tk_fin.get("is_paused", False)
+            tk_fit_paused = c_tk_fit.get("is_paused", False)
+            copy_paused = c_copy.get("is_paused", False)
+
+            btn_radar_cls = "is-paused" if radar_paused else ""
+            btn_radar_act = "▶️ Retomar" if radar_paused else "⏸️ Pausar"
+
+            btn_r1_cls = "is-paused" if r1_paused else ""
+            btn_r1_act = "▶️ Retomar" if r1_paused else "⏸️ Pausar"
+
+            btn_media_cls = "is-paused" if media_paused else ""
+            btn_media_act = "▶️ Retomar" if media_paused else "⏸️ Pausar"
+
+            btn_yt_fin_cls = "is-paused" if yt_fin_paused else ""
+            btn_yt_fin_act = "▶️ Retomar" if yt_fin_paused else "⏸️ Pausar"
+
+            btn_yt_fit_cls = "is-paused" if yt_fit_paused else ""
+            btn_yt_fit_act = "▶️ Retomar" if yt_fit_paused else "⏸️ Pausar"
+
+            btn_tk_fin_cls = "is-paused" if tk_fin_paused else ""
+            btn_tk_fin_act = "▶️ Retomar" if tk_fin_paused else "⏸️ Pausar"
+
+            btn_tk_fit_cls = "is-paused" if tk_fit_paused else ""
+            btn_tk_fit_act = "▶️ Retomar" if tk_fit_paused else "⏸️ Pausar"
+
+            btn_copy_cls = "is-paused" if copy_paused else ""
+            btn_copy_act = "▶️ Retomar" if copy_paused else "⏸️ Pausar"
+
+            robot_controls_html = f"""
+            <div class="robot-controls-card">
+                <div class="robot-controls-header">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(236, 72, 153, 0.15); border: 1px solid rgba(236, 72, 153, 0.4); display: flex; align-items: center; justify-content: center; font-size: 22px;">🎮</div>
+                        <div>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <h3 style="font-size: 16px; font-weight: 700; color: #fff; letter-spacing: -0.3px;">Controle de Robôs Especializados (Micro-Workers)</h3>
+                                <span class="tag-pill" style="background: rgba(99, 102, 241, 0.15); color: #818cf8; font-weight: 700;">Multirobôs Desacoplados</span>
+                            </div>
+                            <p style="font-size: 13px; color: var(--text-muted); margin-top: 3px;">Pause e retome individualmente a fábrica de cortes ou qualquer um dos 4 canais de publicação sem interferência mútua.</p>
+                        </div>
+                    </div>
+
+                    <!-- TELEMETRIA DE RAM -->
+                    <div class="ram-telemetry-box" id="ramTelemetryBox">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <span style="font-size: 12px; font-weight: 600; color: #cbd5e1;">🧠 Memória RAM do Sistema:</span>
+                            <span id="ramUsageText" style="font-size: 12.5px; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #38bdf8;">{ram_pct}% ({ram_used} GB / {ram_total} GB)</span>
+                        </div>
+                        <div style="height: 7px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; width: 100%;">
+                            <div id="ramBarFill" style="height: 100%; width: {ram_pct}%; background: {ram_color}; transition: width 0.4s ease, background 0.4s ease;"></div>
+                        </div>
+                        <div id="ramShieldBadge" style="font-size: 11px; margin-top: 5px; color: #fbbf24; font-weight: 600; display: {shield_disp};">
+                            🛡️ RAM Shield Ativo: Supoclip cortando vídeo (Ollama em espera)
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BOTÕES DE CONTROLE DOS ROBÔS -->
+                <div class="robot-buttons-row">
+                    <!-- BOTÃO MESTRE -->
+                    <button id="btnToggleAll" class="btn-robot-master {btn_all_cls}" onclick="toggleAllRobots()">
+                        {btn_all_label}
+                    </button>
+
+                    <div class="robot-individual-group" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        <button id="btnRobotRadar" class="btn-robot-pill {btn_radar_cls}" onclick="toggleRobot('radar_youtube')" title="Pausa downloads e busca no YouTube">
+                            <span class="dot-status"></span>
+                            <span>📡 Radar Hype</span>
+                            <strong class="btn-robot-action">{btn_radar_act}</strong>
+                        </button>
+
+                        <button id="btnRobotR1" class="btn-robot-pill {btn_r1_cls}" onclick="toggleRobot('robot1_ingest')" title="Pausa envio para o Supoclip">
+                            <span class="dot-status"></span>
+                            <span>📥 Ingestor</span>
+                            <strong class="btn-robot-action">{btn_r1_act}</strong>
+                        </button>
+
+                        <button id="btnRobotMedia" class="btn-robot-pill {btn_media_cls}" onclick="toggleRobot('media_processor')" title="Pausa a renderização de Reframe, Pacing e Copywriting">
+                            <span class="dot-status"></span>
+                            <span>🏭 Fábrica Cortes</span>
+                            <strong class="btn-robot-action">{btn_media_act}</strong>
+                        </button>
+
+                        <button id="btnRobotYtFin" class="btn-robot-pill {btn_yt_fin_cls}" onclick="toggleRobot('pub_yt_financas')" title="Pausa postagens no canal YouTube Raiz do Éden">
+                            <span class="dot-status"></span>
+                            <span>🔴 Raiz do Éden</span>
+                            <strong class="btn-robot-action">{btn_yt_fin_act}</strong>
+                        </button>
+
+                        <button id="btnRobotYtFit" class="btn-robot-pill {btn_yt_fit_cls}" onclick="toggleRobot('pub_yt_fitness')" title="Pausa postagens no canal YouTube Fitness">
+                            <span class="dot-status"></span>
+                            <span>🔴 YT Fitness</span>
+                            <strong class="btn-robot-action">{btn_yt_fit_act}</strong>
+                        </button>
+
+                        <button id="btnRobotTkFin" class="btn-robot-pill {btn_tk_fin_cls}" onclick="toggleRobot('pub_tk_financas')" title="Pausa postagens no TikTok Finanças">
+                            <span class="dot-status"></span>
+                            <span>🎵 TK Finanças</span>
+                            <strong class="btn-robot-action">{btn_tk_fin_act}</strong>
+                        </button>
+
+                        <button id="btnRobotTkFit" class="btn-robot-pill {btn_tk_fit_cls}" onclick="toggleRobot('pub_tk_fitness')" title="Pausa postagens no TikTok Fitness">
+                            <span class="dot-status"></span>
+                            <span>🎵 TK Fitness</span>
+                            <strong class="btn-robot-action">{btn_tk_fit_act}</strong>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            """
+
             # 9. Sinais e Telemetria em Tempo Real dos Processos
             from src.core.process_signals import SignalTracker
             active_signals = SignalTracker.get_all_signals()
@@ -1834,6 +2751,7 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 if s["status"] == "RUNNING": badge_label = f"EM EXECUÇÃO ({pct}%)"
                 elif s["status"] == "COMPLETED": badge_label = "CONCLUÍDO"
                 elif s["status"] == "FAILED": badge_label = "FALHOU"
+                elif s["status"] == "PAUSED": badge_label = "PAUSADO"
 
                 time_str = s["last_updated"].replace("T", " ")[11:19] if s["last_updated"] else "--:--:--"
                 extra_link = ""
@@ -1875,8 +2793,10 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
             # Substituições no Template HTML
             content = HTML_TEMPLATE
             content = content.replace("{{STATUS_ALERT_BANNER}}", alert_banner_html)
+            content = content.replace("{{MEDIA_STOCK_PANEL}}", stock_panel_html)
             content = content.replace("{{NEXT_PUBLICATION_HERO}}", next_hero_html)
             content = content.replace("{{POST_INTERVAL_CONTROL}}", interval_control_html)
+            content = content.replace("{{ROBOT_CONTROLS_AND_RAM_PANEL}}", robot_controls_html)
             content = content.replace("{{PROCESS_SIGNALS_PANEL}}", signals_panel_html)
             content = content.replace("{{ACTIVE_POST_INTERVAL}}", str(current_interval))
             content = content.replace("{{TOTAL_POSTED_YOUTUBE}}", str(total_posted_youtube))
@@ -1889,6 +2809,12 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
             content = content.replace("{{TOTAL_LONG_VIDEOS}}", str(total_long))
             content = content.replace("{{DISK_USAGE}}", str(disk_pct))
             content = content.replace("{{DISK_COLOR}}", disk_color)
+            content = content.replace("{{ACTIVE_QUEUE_COUNT}}", str(active_queue_count))
+            content = content.replace("{{POSTED_COUNT}}", str(posted_count))
+            content = content.replace("{{FAILED_COUNT}}", str(failed_count))
+            content = content.replace("{{TOTAL_PUBS_COUNT}}", str(len(pubs)))
+            content = content.replace("{{TOTAL_FAILED}}", str(failed_count))
+            content = content.replace("{{FAILED_RETRY_DISPLAY}}", "inline-flex" if failed_count > 0 else "none")
             content = content.replace("{{PUBLICATIONS_ROWS}}", pubs_html or "<tr><td colspan='5' style='text-align:center;'>Nenhuma publicação registrada.</td></tr>")
             content = content.replace("{{HEARTBEATS_ROWS}}", beats_html or "<tr><td colspan='4' style='text-align:center;'>Sem heartbeats.</td></tr>")
             content = content.replace("{{CHANNELS_ROWS}}", channels_html or "<tr><td colspan='4' style='text-align:center;'>Nenhum canal monitorado.</td></tr>")

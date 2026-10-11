@@ -225,7 +225,26 @@ class TikTokBrowserPublisher:
                 )
             }
 
-            if self.profile_dir.exists():
+            browser = None
+            if self.state_file.exists():
+                try:
+                    browser = p.chromium.launch(
+                        headless=self.headless,
+                        channel="chrome",
+                        args=["--start-maximized", "--disable-blink-features=AutomationControlled"]
+                    )
+                except Exception:
+                    browser = p.chromium.launch(
+                        headless=self.headless,
+                        args=["--start-maximized", "--disable-blink-features=AutomationControlled"]
+                    )
+                context = browser.new_context(
+                    storage_state=str(self.state_file),
+                    no_viewport=True,
+                    user_agent=context_args["user_agent"]
+                )
+                page = context.new_page()
+            elif self.profile_dir.exists():
                 try:
                     context = p.chromium.launch_persistent_context(
                         user_data_dir=str(self.profile_dir),
@@ -241,7 +260,6 @@ class TikTokBrowserPublisher:
             else:
                 browser = p.chromium.launch(headless=self.headless, args=["--start-maximized"])
                 context = browser.new_context(
-                    storage_state=str(self.state_file) if self.state_file.exists() else None,
                     no_viewport=True,
                     user_agent=context_args["user_agent"]
                 )
@@ -465,4 +483,12 @@ class TikTokBrowserPublisher:
                 logger.error(f"Erro durante publicação no TikTok Studio via navegador: {e}", exc_info=True)
                 raise TikTokPublishError(f"Falha na automação Playwright do TikTok: {e}")
             finally:
-                context.close()
+                try:
+                    context.close()
+                except Exception:
+                    pass
+                if browser:
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass

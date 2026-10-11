@@ -30,6 +30,8 @@ def inspect_media_file(file_path: Path) -> Dict[str, Any]:
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
         data = json.loads(result.stdout)
+    except FileNotFoundError:
+        raise MediaValidationError("ffprobe não encontrado no sistema.")
     except subprocess.TimeoutExpired:
         raise MediaValidationError(f"Timeout ao inspecionar mídia: {file_path}")
     except subprocess.CalledProcessError as e:
@@ -62,12 +64,12 @@ def inspect_media_file(file_path: Path) -> Dict[str, Any]:
         "aspect_ratio": f"{width}:{height}" if height > 0 else "unknown"
     }
 
-def is_video_entirely_black(file_path: Path, max_check_seconds: int = 30) -> bool:
+def is_video_entirely_black(file_path: Path, max_check_seconds: int = 8) -> bool:
     """
     Detecta se o arquivo de vídeo é inteiramente uma tela preta/vazia.
     Evita upload de mock sintético ou renderização falha com tela preta.
     """
-    if not file_path.exists():
+    if not file_path.exists() or file_path.stat().st_size == 0:
         return True
 
     cmd = [
@@ -81,7 +83,7 @@ def is_video_entirely_black(file_path: Path, max_check_seconds: int = 30) -> boo
     ]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
         # Se 90% ou mais da duração checada for preta, considera inválido
         for line in result.stderr.splitlines():
             if "black_duration:" in line:
@@ -101,27 +103,28 @@ def is_video_entirely_black(file_path: Path, max_check_seconds: int = 30) -> boo
         logger.error(f"Erro ao analisar se vídeo é preto: {e}")
         return False
 
-def verify_media_integrity(file_path: Path) -> bool:
+def verify_media_integrity(file_path: Path, max_check_seconds: int = 15, timeout: Optional[int] = None) -> bool:
     """
     Decodifica o container em busca de frames corrompidos sem gerar arquivo de saída.
-    Também rejeita vídeos vazios ou com tela 100% preta.
-    Equivalente a: ffmpeg -v error -i <file> -f null -
+    Também rejeita vídeos vazios ou com tela 100% preta de forma rápida e eficiente.
     """
-    if not file_path.exists():
+    if not file_path.exists() or file_path.stat().st_size == 0:
         return False
 
-    # Valida integridade inspecionando o cabeçalho e os primeiros 120s da mídia
+    effective_timeout = timeout or max(15, int(max_check_seconds * 2.0))
+
+    # Valida integridade inspecionando o cabeçalho e os primeiros N segundos da mídia
     cmd = [
         "ffmpeg",
         "-v", "error",
-        "-t", "120",
+        "-t", str(max_check_seconds),
         "-i", str(file_path),
         "-f", "null",
         "-"
     ]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout)
         if result.returncode != 0 or result.stderr.strip():
             logger.warning(
                 f"Arquivo com potenciais erros de decodificação: {result.stderr.strip()}",
@@ -136,8 +139,11 @@ def verify_media_integrity(file_path: Path) -> bool:
             return False
 
         return True
+    except FileNotFoundError:
+        logger.error("ffmpeg executável não encontrado no sistema.")
+        return False
     except subprocess.TimeoutExpired:
-        logger.error(f"Timeout ao verificar integridade de {file_path}")
+        logger.error(f"Timeout ao verificar integridade de {file_path} (limite: {effective_timeout}s)")
         return False
     except Exception as e:
         logger.error(f"Erro ao verificar integridade de {file_path}: {e}")

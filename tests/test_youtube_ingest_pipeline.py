@@ -12,6 +12,7 @@ from src.services.downloader import download_youtube_video
 from src.services.supoclip_client import SupoclipClient
 from src.robot1_ingest import process_single_video
 
+@pytest.mark.e2e
 def test_fetch_real_youtube_video_metadata():
     """Valida coleta real de metadados de vídeo do YouTube usando o ambiente configurado."""
     yt_id = "jNQXAC9IVRw"  # 'Me at the zoo'
@@ -23,6 +24,7 @@ def test_fetch_real_youtube_video_metadata():
     assert metrics["duration_seconds"] > 0
     assert metrics["view_count"] > 1000
 
+@pytest.mark.e2e
 def test_end_to_end_youtube_ingest_pipeline():
     """
     Executa o fluxo completo com vídeo real do YouTube:
@@ -74,6 +76,7 @@ def test_end_to_end_youtube_ingest_pipeline():
         assert job_row["supoclip_job_id"] == row["supoclip_job_id"]
         assert job_row["status"] in ("SUBMITTED", "PROCESSING", "COMPLETED")
 
+@pytest.mark.e2e
 def test_idempotency_prevents_duplicate_reingest():
     """Valida que uma segunda tentativa de ingerir o mesmo vídeo é ignorada de forma idempotente."""
     yt_id = "jNQXAC9IVRw"
