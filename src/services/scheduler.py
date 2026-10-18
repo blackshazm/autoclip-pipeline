@@ -1,12 +1,13 @@
 """
 Agendador de Publicações com Buffer Anti-Spam, Janelas Horárias e Jitter.
 """
+
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import hashlib
 import json
 import random
-from typing import List, Optional
+from typing import Optional
 import sqlite3
 
 from src.core.config import settings
@@ -15,16 +16,15 @@ from src.core.database import get_db
 
 logger = get_logger("scheduler")
 
+
 def generate_idempotency_key(clip_uid: str, platform: str, account_id: int) -> str:
     """Gera chave SHA-256 única para assegurar zero duplicidade de publicação."""
     raw = f"{clip_uid}_{platform}_{account_id}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
+
 def get_next_available_slot(
-    account_id: int, 
-    platform: str, 
-    conn: sqlite3.Connection,
-    long_video_id: Optional[int] = None
+    account_id: int, platform: str, conn: sqlite3.Connection, long_video_id: Optional[int] = None
 ) -> datetime:
     """
     Calcula a próxima data/hora de publicação elegível para a conta:
@@ -37,11 +37,14 @@ def get_next_available_slot(
     now_local = datetime.now(tz)
 
     cursor = conn.cursor()
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT posting_windows, min_interval_minutes
         FROM publishing_accounts
         WHERE id = ?;
-    """, (account_id,))
+    """,
+        (account_id,),
+    )
     acc_row = cursor.fetchone()
 
     interval_minutes = settings.POST_INTERVAL_MINUTES
@@ -58,11 +61,14 @@ def get_next_available_slot(
 
     min_interval = timedelta(minutes=interval_minutes)
 
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT MAX(scheduled_for) as last_sched
         FROM publications
         WHERE publishing_account_id = ? AND platform = ? AND status IN ('SCHEDULED', 'UPLOADING');
-    """, (account_id, platform))
+    """,
+        (account_id, platform),
+    )
     row = cursor.fetchone()
 
     base_time = now_local
@@ -78,14 +84,17 @@ def get_next_available_slot(
 
     # Espaçamento Anti-Repetição: Evita rajadas consecutivas do mesmo vídeo longo
     if long_video_id:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT MAX(p.scheduled_for) as last_video_sched
             FROM publications p
             JOIN clips c ON p.clip_id = c.id
             WHERE p.publishing_account_id = ? AND p.platform = ?
               AND c.long_video_id = ?
               AND p.status IN ('SCHEDULED', 'UPLOADING');
-        """, (account_id, platform, long_video_id))
+        """,
+            (account_id, platform, long_video_id),
+        )
         row_v = cursor.fetchone()
         if row_v and row_v["last_video_sched"]:
             try:
@@ -108,21 +117,28 @@ def get_next_available_slot(
 
     candidate_date = base_time.date()
 
-    for day_offset in range(14): # Procura nos próximos 14 dias
+    for day_offset in range(14):  # Procura nos próximos 14 dias
         current_day = candidate_date + timedelta(days=day_offset)
         for window_str in windows:
             try:
                 hour, minute = map(int, window_str.split(":"))
             except Exception:
                 continue
-            jitter_seconds = random.randint(5, 20) if interval_minutes <= 5 else (random.randint(10, 60) if interval_minutes <= 15 else random.randint(30, 180))
-            slot = datetime(current_day.year, current_day.month, current_day.day, hour, minute, tzinfo=tz) + timedelta(seconds=jitter_seconds)
+            jitter_seconds = (
+                random.randint(5, 20)
+                if interval_minutes <= 5
+                else (random.randint(10, 60) if interval_minutes <= 15 else random.randint(30, 180))
+            )
+            slot = datetime(current_day.year, current_day.month, current_day.day, hour, minute, tzinfo=tz) + timedelta(
+                seconds=jitter_seconds
+            )
 
             if slot >= base_time:
                 return slot.astimezone(timezone.utc)
 
     # Fallback seguro: intervalo a partir de agora
     return (now_local + min_interval).astimezone(timezone.utc)
+
 
 def schedule_pending_clips() -> int:
     """
@@ -136,23 +152,33 @@ def schedule_pending_clips() -> int:
 
         # 1. Expira clips antigos (> 7 dias)
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=settings.MAX_CLIP_AGE_DAYS)
-        cursor.execute("""
+        cursor.execute(
+            """
             UPDATE clips
             SET youtube_status = 'SKIPPED', tiktok_status = 'SKIPPED'
             WHERE created_at < ? AND (youtube_status = 'PENDING' OR tiktok_status = 'PENDING');
-        """, (cutoff_date.isoformat(),))
+        """,
+            (cutoff_date.isoformat(),),
+        )
 
         # 2. Busca contas ativas com seus respectivos nichos
-        cursor.execute("SELECT id, platform, timezone, max_daily_posts, niche FROM publishing_accounts WHERE active = 1;")
+        cursor.execute(
+            "SELECT id, platform, timezone, max_daily_posts, niche FROM publishing_accounts WHERE active = 1;"
+        )
         accounts = cursor.fetchall()
         if not accounts:
             logger.warning("Nenhuma conta de publicação ativa encontrada.")
             return 0
 
-        from src.services.overlap_filter import filter_overlapping_clips, filter_against_database, round_robin_interleave
+        from src.services.overlap_filter import (
+            filter_overlapping_clips,
+            filter_against_database,
+            round_robin_interleave,
+        )
 
         # 3. Busca clips aprovados com metadados e nicho do canal fonte
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT c.id, c.clip_uid, c.virality_score, c.title, c.created_at, 
                    c.series_id, c.part_number, c.total_parts,
                    c.long_video_id, c.start_seconds, c.end_seconds, c.duration_seconds,
@@ -166,7 +192,9 @@ def schedule_pending_clips() -> int:
               AND c.moderation_status = 'APPROVED'
               AND c.title IS NOT NULL
               AND (c.youtube_status = 'PENDING' OR c.tiktok_status = 'PENDING' OR c.youtube_status IS NULL);
-        """, (settings.MIN_VIRALITY_SCORE,))
+        """,
+            (settings.MIN_VIRALITY_SCORE,),
+        )
         raw_clips = [dict(r) for r in cursor.fetchall()]
 
         if not raw_clips:
@@ -176,35 +204,49 @@ def schedule_pending_clips() -> int:
         after_db_check, discarded_by_db = filter_against_database(raw_clips, conn=conn, max_overlap_threshold=0.25)
         for disc in discarded_by_db:
             reason = disc.get("_overlap_reason", "Sobreposição com corte histórico existente")
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE clips
-                SET youtube_status = 'SKIPPED_OVERLAP', tiktok_status = 'SKIPPED_OVERLAP', error_log = ?
+                SET youtube_status = 'SKIPPED', tiktok_status = 'SKIPPED', error_log = ?
                 WHERE id = ?;
-            """, (reason, disc["id"]))
+            """,
+                (reason, disc["id"]),
+            )
             # Cancela publicações pendentes se houver
-            cursor.execute("""
+            cursor.execute(
+                """
                 DELETE FROM publications 
                 WHERE clip_id = ? AND status = 'SCHEDULED';
-            """, (disc["id"],))
+            """,
+                (disc["id"],),
+            )
             logger.info(f"Corte {disc.get('clip_uid')} descartado por sobreposição histórica: {reason}")
 
         # 3.2 Filtra cortes com sobreposição temporal excessiva interna no lote
         valid_clips, discarded_clips = filter_overlapping_clips(after_db_check, max_overlap_threshold=0.25)
         for disc in discarded_clips:
             reason = disc.get("_overlap_reason", "Sobreposição temporal detectada no lote")
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE clips
-                SET youtube_status = 'SKIPPED_OVERLAP', tiktok_status = 'SKIPPED_OVERLAP', error_log = ?
+                SET youtube_status = 'SKIPPED', tiktok_status = 'SKIPPED', error_log = ?
                 WHERE id = ?;
-            """, (reason, disc["id"]))
-            cursor.execute("""
+            """,
+                (reason, disc["id"]),
+            )
+            cursor.execute(
+                """
                 DELETE FROM publications 
                 WHERE clip_id = ? AND status = 'SCHEDULED';
-            """, (disc["id"],))
+            """,
+                (disc["id"],),
+            )
             logger.info(f"Corte {disc.get('clip_uid')} descartado do agendamento: {reason}")
 
         # 3.3 Intercala os cortes válidos em Round-Robin (distribui por vídeo longo e canal)
-        interleaved_clips = round_robin_interleave(valid_clips, group_key="long_video_id", secondary_key="source_channel_id")
+        interleaved_clips = round_robin_interleave(
+            valid_clips, group_key="long_video_id", secondary_key="source_channel_id"
+        )
 
         for clip in interleaved_clips:
             clip_id = clip["id"]
@@ -213,20 +255,20 @@ def schedule_pending_clips() -> int:
             clip_niche = clip.get("clip_niche") or "general"
 
             # Roteamento estrito por nicho: casa nicho do corte com nicho da conta de destino
-            target_accounts = [
-                acc for acc in accounts
-                if acc["niche"] == clip_niche
-            ]
+            target_accounts = [acc for acc in accounts if acc["niche"] == clip_niche]
 
             for acc in target_accounts:
                 acc_id = acc["id"]
                 platform = acc["platform"]
 
                 # Pula se já houver publicação agendada ou enviada para esta conta específica
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT id FROM publications 
                     WHERE clip_id = ? AND publishing_account_id = ? AND status IN ('SCHEDULED', 'POSTED', 'UPLOADING');
-                """, (clip_id, acc_id))
+                """,
+                    (clip_id, acc_id),
+                )
                 if cursor.fetchone():
                     continue
 
@@ -235,16 +277,22 @@ def schedule_pending_clips() -> int:
                 # Calcula slot com espaçamento anti-repetição por vídeo longo
                 slot_utc = get_next_available_slot(acc_id, platform, conn, long_video_id=long_vid_id)
 
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT INTO publications (
                         clip_id, publishing_account_id, platform, status,
                         scheduled_for, idempotency_key
                     ) VALUES (?, ?, ?, 'SCHEDULED', ?, ?);
-                """, (clip_id, acc_id, platform, slot_utc.isoformat(), idempotency_key))
+                """,
+                    (clip_id, acc_id, platform, slot_utc.isoformat(), idempotency_key),
+                )
 
                 # Atualiza status na tabela clips para rastreabilidade
                 if platform == "youtube":
-                    cursor.execute("UPDATE clips SET youtube_status = 'SCHEDULED', scheduled_for = ? WHERE id = ?;", (slot_utc.isoformat(), clip_id))
+                    cursor.execute(
+                        "UPDATE clips SET youtube_status = 'SCHEDULED', scheduled_for = ? WHERE id = ?;",
+                        (slot_utc.isoformat(), clip_id),
+                    )
                 elif platform == "tiktok":
                     cursor.execute("UPDATE clips SET tiktok_status = 'SCHEDULED' WHERE id = ?;", (clip_id,))
 
@@ -252,8 +300,12 @@ def schedule_pending_clips() -> int:
                 enqueued_count += 1
                 logger.info(
                     f"Clip {clip_uid} (Vídeo {long_vid_id}, score {clip['virality_score']}) agendado para {platform} em {slot_utc.isoformat()}",
-                    extra={"event": "clip_scheduled", "clip_uid": clip_uid, "platform": platform, "slot": slot_utc.isoformat()}
+                    extra={
+                        "event": "clip_scheduled",
+                        "clip_uid": clip_uid,
+                        "platform": platform,
+                        "slot": slot_utc.isoformat(),
+                    },
                 )
 
     return enqueued_count
-

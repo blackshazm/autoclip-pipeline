@@ -1,12 +1,12 @@
 """
 Serviço de Retenção, Limpeza Normal, Auto-Cleanup e Proteção Emergencial de Disco.
 """
-import os
+
 import shutil
 import time
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from src.core.config import settings
 from src.core.logger import get_logger
@@ -16,6 +16,7 @@ from src.services.notifier import notify_alert
 
 logger = get_logger("cleanup")
 
+
 def get_disk_usage_percent(path: Path) -> float:
     """Retorna a porcentagem de espaço em disco ocupado."""
     try:
@@ -24,6 +25,7 @@ def get_disk_usage_percent(path: Path) -> float:
     except Exception as e:
         logger.error(f"Erro ao consultar uso de disco em {path}: {e}")
         return 0.0
+
 
 def purge_clip_files(clip_id: int, file_path_str: str, conn=None) -> int:
     """
@@ -41,7 +43,7 @@ def purge_clip_files(clip_id: int, file_path_str: str, conn=None) -> int:
                 freed += size
                 logger.info(
                     f"Arquivo de vídeo do corte purgado do disco ({size / (1024*1024):.2f} MB): {p.name}",
-                    extra={"event": "purge_clip_file", "clip_id": clip_id, "file_name": p.name}
+                    extra={"event": "purge_clip_file", "clip_id": clip_id, "file_name": p.name},
                 )
         except Exception as e:
             logger.error(f"Erro ao remover arquivo de vídeo {p}: {e}")
@@ -70,6 +72,7 @@ def purge_clip_files(clip_id: int, file_path_str: str, conn=None) -> int:
 
     return freed
 
+
 def check_and_purge_clip_if_fully_published(clip_id: int, conn=None) -> bool:
     """
     Hook Reativo: Verifica se o corte já cumpriu seu ciclo de vida em ambas as plataformas
@@ -81,11 +84,14 @@ def check_and_purge_clip_if_fully_published(clip_id: int, conn=None) -> bool:
 
     def _query_and_purge(c) -> bool:
         cursor = c.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT id, file_path, youtube_status, tiktok_status, is_deleted_from_disk
             FROM clips
             WHERE id = ?;
-        """, (clip_id,))
+        """,
+            (clip_id,),
+        )
         row = cursor.fetchone()
         if not row:
             return False
@@ -94,11 +100,14 @@ def check_and_purge_clip_if_fully_published(clip_id: int, conn=None) -> bool:
             return False
 
         # Verifica se ainda há publicações ativas ou pendentes na fila
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT count(*) as pending_count
             FROM publications
             WHERE clip_id = ? AND status IN ('SCHEDULED', 'UPLOADING', 'PENDING');
-        """, (clip_id,))
+        """,
+            (clip_id,),
+        )
         p_row = cursor.fetchone()
         if p_row and p_row["pending_count"] > 0:
             return False  # Ainda há publicações ativas aguardando este arquivo físico!
@@ -111,11 +120,7 @@ def check_and_purge_clip_if_fully_published(clip_id: int, conn=None) -> bool:
             logger.info(
                 f"Auto-cleanup imediato acionado para clip #{clip_id}: YouTube ({row['youtube_status']}) "
                 f"& TikTok ({row['tiktok_status']}). {freed / (1024*1024):.2f} MB liberados.",
-                extra={
-                    "event": "clip_auto_purged_on_dual_publish",
-                    "clip_id": clip_id,
-                    "freed_bytes": freed
-                }
+                extra={"event": "clip_auto_purged_on_dual_publish", "clip_id": clip_id, "freed_bytes": freed},
             )
             return True
         return False
@@ -125,6 +130,7 @@ def check_and_purge_clip_if_fully_published(clip_id: int, conn=None) -> bool:
     else:
         with get_db() as local_conn:
             return _query_and_purge(local_conn)
+
 
 def purge_orphan_temporary_files(hours_threshold: float = 2.0) -> int:
     """
@@ -151,7 +157,7 @@ def purge_orphan_temporary_files(hours_threshold: float = 2.0) -> int:
                                     freed += size
                                     logger.info(
                                         f"Arquivo temporário/órfão removido ({size / 1024:.1f} KB): {item.name}",
-                                        extra={"event": "purge_temp_file", "file_name": item.name}
+                                        extra={"event": "purge_temp_file", "file_name": item.name},
                                     )
                         except Exception as e:
                             logger.debug(f"Erro ao avaliar/remover temporário {item}: {e}")
@@ -159,6 +165,7 @@ def purge_orphan_temporary_files(hours_threshold: float = 2.0) -> int:
             logger.error(f"Erro ao varrer diretório {scan_dir} para limpeza temporária: {e}")
 
     return freed
+
 
 def run_disk_cleanup(dry_run: bool = False) -> Dict[str, Any]:
     """
@@ -180,11 +187,13 @@ def run_disk_cleanup(dry_run: bool = False) -> Dict[str, Any]:
         # 1. Purga de vídeos longos já processados pelo Supoclip ou falhados/estagnados
         if getattr(settings, "AUTO_DELETE_LONG_VIDEOS_ON_COMPLETION", True):
             # 1.1 Concluídos ou Falhados
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT id, file_path, status
                 FROM long_videos
                 WHERE status IN ('COMPLETED', 'FAILED') AND is_deleted_from_disk = 0;
-            """)
+            """
+            )
             stale_long = cursor.fetchall()
 
             for row in stale_long:
@@ -196,10 +205,12 @@ def run_disk_cleanup(dry_run: bool = False) -> Dict[str, Any]:
                             if safe_unlink(p):
                                 freed_bytes += size
                                 deleted_long_videos += 1
-                                cursor.execute("UPDATE long_videos SET is_deleted_from_disk = 1 WHERE id = ?;", (row["id"],))
+                                cursor.execute(
+                                    "UPDATE long_videos SET is_deleted_from_disk = 1 WHERE id = ?;", (row["id"],)
+                                )
                                 logger.info(
                                     f"Vídeo longo ({row['status']}) purgado do disco ({size / (1024*1024):.2f} MB): {p.name}",
-                                    extra={"event": "purge_long_video", "video_id": row["id"], "status": row["status"]}
+                                    extra={"event": "purge_long_video", "video_id": row["id"], "status": row["status"]},
                                 )
                         except Exception as e:
                             logger.error(f"Erro ao remover vídeo bruto {p}: {e}")
@@ -212,14 +223,17 @@ def run_disk_cleanup(dry_run: bool = False) -> Dict[str, Any]:
 
             # 1.2 Vídeos travados em PROCESSING há mais de 24h sem jobs em andamento
             stale_processing_cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT id, file_path
                 FROM long_videos
                 WHERE status = 'PROCESSING' 
                   AND is_deleted_from_disk = 0
                   AND created_at < ?
                   AND id NOT IN (SELECT long_video_id FROM supoclip_jobs WHERE status IN ('SUBMITTED', 'PROCESSING'));
-            """, (stale_processing_cutoff,))
+            """,
+                (stale_processing_cutoff,),
+            )
             abandoned_processing = cursor.fetchall()
 
             for row in abandoned_processing:
@@ -231,10 +245,13 @@ def run_disk_cleanup(dry_run: bool = False) -> Dict[str, Any]:
                             if safe_unlink(p):
                                 freed_bytes += size
                                 deleted_long_videos += 1
-                                cursor.execute("UPDATE long_videos SET status = 'FAILED', is_deleted_from_disk = 1, error_message = 'Timeout de processamento (>24h)' WHERE id = ?;", (row["id"],))
+                                cursor.execute(
+                                    "UPDATE long_videos SET status = 'FAILED', is_deleted_from_disk = 1, error_message = 'Timeout de processamento (>24h)' WHERE id = ?;",
+                                    (row["id"],),
+                                )
                                 logger.info(
                                     f"Vídeo longo abandonado em PROCESSING (>24h) purgado ({size / (1024*1024):.2f} MB): {p.name}",
-                                    extra={"event": "purge_stale_processing_long_video", "video_id": row["id"]}
+                                    extra={"event": "purge_stale_processing_long_video", "video_id": row["id"]},
                                 )
                         except Exception as e:
                             logger.error(f"Erro ao remover vídeo longo abandonado {p}: {e}")
@@ -243,13 +260,19 @@ def run_disk_cleanup(dry_run: bool = False) -> Dict[str, Any]:
                         deleted_long_videos += 1
                 else:
                     if not dry_run:
-                        cursor.execute("UPDATE long_videos SET status = 'FAILED', is_deleted_from_disk = 1, error_message = 'Timeout de processamento (>24h)' WHERE id = ?;", (row["id"],))
+                        cursor.execute(
+                            "UPDATE long_videos SET status = 'FAILED', is_deleted_from_disk = 1, error_message = 'Timeout de processamento (>24h)' WHERE id = ?;",
+                            (row["id"],),
+                        )
 
             # 1.3 Arquivos .mp4 órfãos em WATCH_DIR não vinculados a nenhum vídeo ativo
             if not dry_run and settings.WATCH_DIR.exists():
                 try:
                     for f in settings.WATCH_DIR.glob("*.mp4"):
-                        cursor.execute("SELECT id, status FROM long_videos WHERE file_name = ? OR file_path LIKE ?;", (f.name, f"%{f.name}"))
+                        cursor.execute(
+                            "SELECT id, status FROM long_videos WHERE file_name = ? OR file_path LIKE ?;",
+                            (f.name, f"%{f.name}"),
+                        )
                         db_entry = cursor.fetchone()
                         # Se não existe no banco e tem mais de 2 horas
                         if not db_entry and (time.time() - f.stat().st_mtime > 7200):
@@ -257,17 +280,22 @@ def run_disk_cleanup(dry_run: bool = False) -> Dict[str, Any]:
                             if safe_unlink(f):
                                 freed_bytes += size
                                 deleted_long_videos += 1
-                                logger.info(f"Arquivo de vídeo órfão sem registro no banco purgado: {f.name} ({size / (1024*1024):.2f} MB)")
+                                logger.info(
+                                    f"Arquivo de vídeo órfão sem registro no banco purgado: {f.name} ({size / (1024*1024):.2f} MB)"
+                                )
                 except Exception as e:
                     logger.debug(f"Erro na checagem de órfãos em {settings.WATCH_DIR}: {e}")
 
         # 2. Purga de clips reprovados (virality_score < MIN_VIRALITY_SCORE)
         if settings.MIN_VIRALITY_SCORE > 0:
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT id, file_path
                 FROM clips
                 WHERE virality_score < ? AND is_deleted_from_disk = 0;
-            """, (settings.MIN_VIRALITY_SCORE,))
+            """,
+                (settings.MIN_VIRALITY_SCORE,),
+            )
             low_score_clips = cursor.fetchall()
 
             for row in low_score_clips:
@@ -292,16 +320,19 @@ def run_disk_cleanup(dry_run: bool = False) -> Dict[str, Any]:
             keep_hours = getattr(settings, "KEEP_POSTED_CLIPS_HOURS", 0)
             if keep_hours <= 0:
                 # Imediato
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT id, file_path
                     FROM clips
                     WHERE youtube_status IN ('POSTED', 'SKIPPED')
                       AND tiktok_status IN ('POSTED', 'SKIPPED')
                       AND is_deleted_from_disk = 0;
-                """)
+                """
+                )
             else:
                 retention_cutoff = datetime.now(timezone.utc) - timedelta(hours=keep_hours)
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT id, file_path
                     FROM clips
                     WHERE youtube_status IN ('POSTED', 'SKIPPED')
@@ -309,7 +340,9 @@ def run_disk_cleanup(dry_run: bool = False) -> Dict[str, Any]:
                       AND published_at IS NOT NULL
                       AND published_at < ?
                       AND is_deleted_from_disk = 0;
-                """, (retention_cutoff.isoformat(),))
+                """,
+                    (retention_cutoff.isoformat(),),
+                )
 
             posted_clips = cursor.fetchall()
 
@@ -343,7 +376,7 @@ def run_disk_cleanup(dry_run: bool = False) -> Dict[str, Any]:
                     "cleanup",
                     "Espaço em Disco Crítico",
                     f"Uso do disco em {current_disk_pct}% (Acima do limite rígido de {settings.DISK_HARD_THRESHOLD}%).",
-                    conn=conn
+                    conn=conn,
                 )
             elif current_disk_pct >= settings.DISK_ALERT_THRESHOLD:
                 notify_alert(
@@ -351,23 +384,26 @@ def run_disk_cleanup(dry_run: bool = False) -> Dict[str, Any]:
                     "cleanup",
                     "Alerta de Espaço em Disco",
                     f"Uso do disco em {current_disk_pct}% (Acima do limiar de alerta de {settings.DISK_ALERT_THRESHOLD}%).",
-                    conn=conn
+                    conn=conn,
                 )
 
             # 6. Registra o run na tabela cleanup_runs
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO cleanup_runs (
                     started_at, finished_at, status, deleted_long_videos,
                     deleted_clips, freed_bytes, disk_usage_percent
                 ) VALUES (?, ?, 'COMPLETED', ?, ?, ?, ?);
-            """, (
-                started_at.isoformat(),
-                datetime.now(timezone.utc).isoformat(),
-                deleted_long_videos,
-                deleted_clips,
-                freed_bytes,
-                current_disk_pct
-            ))
+            """,
+                (
+                    started_at.isoformat(),
+                    datetime.now(timezone.utc).isoformat(),
+                    deleted_long_videos,
+                    deleted_clips,
+                    freed_bytes,
+                    current_disk_pct,
+                ),
+            )
 
     result = {
         "deleted_long_videos": deleted_long_videos,
@@ -375,13 +411,15 @@ def run_disk_cleanup(dry_run: bool = False) -> Dict[str, Any]:
         "freed_bytes": freed_bytes,
         "freed_mb": round(freed_bytes / (1024 * 1024), 2),
         "disk_usage_percent": current_disk_pct,
-        "dry_run": dry_run
+        "dry_run": dry_run,
     }
     logger.info(f"Ciclo de limpeza de disco concluído: {result}", extra={"event": "cleanup_finished", **result})
     return result
 
+
 if __name__ == "__main__":
     import sys
+
     is_dry = "--dry-run" in sys.argv
     res = run_disk_cleanup(dry_run=is_dry)
     print(f"Limpeza de disco executada: {res}")

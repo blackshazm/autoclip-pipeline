@@ -61,3 +61,15 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Linters & Test Reports
+flake8_*.txt
+ruff_*.txt
+mypy_*.txt
+pytest_*.txt
+black_*.txt
+test_output.txt
+test_result.txt
+*.sqlite
+database.sqlite
+fake_dir/

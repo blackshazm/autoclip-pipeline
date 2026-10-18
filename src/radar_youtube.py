@@ -2,11 +2,13 @@
 MÓDULO 0: Radar de Hype do YouTube (radar_youtube.py).
 Monitoramento contínuo de canais via RSS, cálculo de VPH e download seletivo de virais.
 """
+
 import argparse
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import List, Dict, Optional
 import requests
 import json
 
@@ -27,38 +29,40 @@ from src.core.pipeline_control import PipelineController
 
 logger = get_logger("radar_youtube")
 
+
 def fetch_channel_feed(rss_url: str, channel_ref: Optional[str] = None) -> List[Dict[str, str]]:
     """
-    Lê feed RSS do YouTube e extrai IDs dos vídeos recentes sem consumir quota de API.
-    Em caso de falha do RSS (ex: HTTP 404 ou formato indisponível), utiliza fallback resiliente via yt-dlp.
+    Lê vídeos recentes do canal do YouTube.
+    Tenta feed RSS quando disponível e utiliza fallback resiliente via yt-dlp caso o YouTube retorne HTTP 404.
     """
-    try:
-        response = requests.get(rss_url, timeout=15)
-        if response.status_code == 200:
-            root = ET.fromstring(response.content)
-            ns = {
-                "atom": "http://www.w3.org/2005/Atom",
-                "yt": "http://www.youtube.com/xml/schemas/2015"
-            }
+    entries = []
+    # Tenta RSS apenas se a URL for explicitamente um feed XML
+    if "feeds/videos.xml" in rss_url:
+        try:
+            response = requests.get(rss_url, timeout=10)
+            if response.status_code == 200:
+                root = ET.fromstring(response.content)
+                ns = {"atom": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015"}
 
-            entries = []
-            for entry in root.findall("atom:entry", ns):
-                video_id_elem = entry.find("yt:videoId", ns)
-                title_elem = entry.find("atom:title", ns)
-                published_elem = entry.find("atom:published", ns)
+                for entry in root.findall("atom:entry", ns):
+                    video_id_elem = entry.find("yt:videoId", ns)
+                    title_elem = entry.find("atom:title", ns)
+                    published_elem = entry.find("atom:published", ns)
 
-                if video_id_elem is not None and video_id_elem.text:
-                    entries.append({
-                        "youtube_id": video_id_elem.text,
-                        "title": title_elem.text if title_elem is not None else "",
-                        "published_at": published_elem.text if published_elem is not None else ""
-                    })
-            if entries:
-                return entries
-        else:
-            logger.warning(f"Feed RSS indisponível ({rss_url}): HTTP {response.status_code}. Tentando fallback...")
-    except Exception as e:
-        logger.warning(f"Falha ao ler feed RSS {rss_url}: {e}. Acionando fallback...")
+                    if video_id_elem is not None and video_id_elem.text:
+                        entries.append(
+                            {
+                                "youtube_id": video_id_elem.text,
+                                "title": title_elem.text if title_elem is not None else "",
+                                "published_at": published_elem.text if published_elem is not None else "",
+                            }
+                        )
+                if entries:
+                    return entries
+            else:
+                logger.info(f"Feed RSS legado indisponível (HTTP {response.status_code}). Utilizando motor direto yt-dlp...")
+        except Exception as e:
+            logger.info(f"Feed RSS inacessível ({e}). Utilizando motor direto yt-dlp...")
 
     # Fallback via yt-dlp flat-playlist
     target_channel = channel_ref
@@ -69,38 +73,61 @@ def fetch_channel_feed(rss_url: str, channel_ref: Optional[str] = None) -> List[
             target_channel = rss_url
 
     if target_channel:
-        channel_url = f"https://www.youtube.com/channel/{target_channel}/videos" if target_channel.startswith("UC") else f"https://www.youtube.com/{target_channel}/videos"
+        if target_channel.startswith("http"):
+            channel_url = target_channel
+        elif target_channel.startswith("UC"):
+            channel_url = f"https://www.youtube.com/channel/{target_channel}/videos"
+        else:
+            channel_url = f"https://www.youtube.com/{target_channel}/videos"
+
         try:
             import subprocess
             import sys
             import json
+
             cmd = [
-                sys.executable, "-m", "yt_dlp",
+                sys.executable,
+                "-m",
+                "yt_dlp",
                 "--flat-playlist",
                 "--dump-single-json",
-                "--playlist-items", "1:20",
+                "--playlist-items",
+                "1:20",
                 "--no-warnings",
-                channel_url
+                "--js-runtimes",
+                "node",
             ]
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
-            if res.returncode == 0:
+            # Injeta cookies se disponíveis
+            config_dir = Path("./config")
+            cookie_candidates = [
+                config_dir / "cookies_fitness.txt",
+                config_dir / "cookies_financas.txt",
+                Path(settings.YTDLP_COOKIES_PATH),
+            ]
+            valid_cookies = [c for c in cookie_candidates if c.exists() and c.stat().st_size > 0]
+            if valid_cookies:
+                freshest_cookie = max(valid_cookies, key=lambda c: c.stat().st_mtime)
+                cmd.extend(["--cookies", str(freshest_cookie)])
+
+            cmd.append(channel_url)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if res.returncode == 0 and res.stdout.strip():
                 data = json.loads(res.stdout)
                 fallback_entries = []
                 for item in data.get("entries", []):
                     v_id = item.get("id")
                     if v_id:
-                        fallback_entries.append({
-                            "youtube_id": v_id,
-                            "title": item.get("title", ""),
-                            "published_at": ""
-                        })
+                        fallback_entries.append(
+                            {"youtube_id": v_id, "title": item.get("title", ""), "published_at": ""}
+                        )
                 if fallback_entries:
-                    logger.info(f"Fallback yt-dlp obteve {len(fallback_entries)} vídeos para {target_channel}")
+                    logger.info(f"yt-dlp obteve {len(fallback_entries)} vídeos para {target_channel}")
                     return fallback_entries
         except Exception as e:
             logger.error(f"Fallback yt-dlp para canal {target_channel} falhou: {e}")
 
     return []
+
 
 def process_candidate_download(yt_id: str, title: str = "", vph: int = 0, engagement_ratio: float = 0.0) -> bool:
     """Baixa o vídeo de um candidato qualificado, extrai metadados/heatmap e atualiza o banco de dados."""
@@ -120,27 +147,38 @@ def process_candidate_download(yt_id: str, title: str = "", vph: int = 0, engage
 
         def _update_downloaded(yid=yt_id):
             with get_db() as conn:
-                conn.cursor().execute("""
+                conn.cursor().execute(
+                    """
                     UPDATE radar_candidates
                     SET status = 'DOWNLOADED', downloaded_at = datetime('now')
                     WHERE youtube_id = ?;
-                """, (yid,))
+                """,
+                    (yid,),
+                )
+
         _execute_with_retry(_update_downloaded, label=f"radar_update_downloaded_{yt_id}")
         return True
     else:
         logger.warning(f"Download falhou para candidato {yt_id}. Marcando como ERROR para liberar ciclo.")
+
         def _update_error(yid=yt_id):
             with get_db() as conn:
-                conn.cursor().execute("""
+                conn.cursor().execute(
+                    """
                     UPDATE radar_candidates
                     SET status = 'ERROR', reject_reason = 'Falha no download via yt-dlp'
                     WHERE youtube_id = ?;
-                """, (yid,))
+                """,
+                    (yid,),
+                )
+
         _execute_with_retry(_update_error, label=f"radar_update_error_{yt_id}")
         return False
 
 
-def download_pending_qualified_candidates(downloads_count: int = 0, max_downloads: int = 5, dry_run: bool = False) -> int:
+def download_pending_qualified_candidates(
+    downloads_count: int = 0, max_downloads: int = 5, dry_run: bool = False
+) -> int:
     """
     Busca vídeos já qualificados no banco que ainda não foram baixados, garantindo fluxo contínuo
     mesmo que os vídeos tenham saído do topo do feed RSS recente.
@@ -151,7 +189,8 @@ def download_pending_qualified_candidates(downloads_count: int = 0, max_download
     remaining_slots = max_downloads - downloads_count
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT rc.youtube_id, rc.title, rc.vph, sc.niche, sc.name as channel_name
             FROM radar_candidates rc
             JOIN source_channels sc ON rc.source_channel_id = sc.id
@@ -160,7 +199,9 @@ def download_pending_qualified_candidates(downloads_count: int = 0, max_download
               AND rc.youtube_id NOT IN (SELECT youtube_id FROM long_videos WHERE youtube_id IS NOT NULL)
             ORDER BY rc.id DESC
             LIMIT ?;
-        """, (remaining_slots,))
+        """,
+            (remaining_slots,),
+        )
         pending = [dict(r) for r in cursor.fetchall()]
 
     if not pending:
@@ -170,7 +211,9 @@ def download_pending_qualified_candidates(downloads_count: int = 0, max_download
 
     for cand in pending:
         yt_id = cand["youtube_id"]
-        logger.info(f"Baixando candidato qualificado da fila: {yt_id} ({cand.get('channel_name')} - {cand.get('niche')})")
+        logger.info(
+            f"Baixando candidato qualificado da fila: {yt_id} ({cand.get('channel_name')} - {cand.get('niche')})"
+        )
         if process_candidate_download(yt_id, title=cand.get("title", ""), vph=cand.get("vph", 0)):
             downloads_count += 1
             time.sleep(5.0)
@@ -209,7 +252,7 @@ def run_radar_cycle(dry_run: bool = False) -> int:
         "radar_youtube",
         "Varredura de Canais",
         total_steps=len(channels),
-        message=f"Monitorando {len(channels)} canais ativos"
+        message=f"Monitorando {len(channels)} canais ativos",
     )
 
     for ch_idx, channel in enumerate(channels, 1):
@@ -222,12 +265,11 @@ def run_radar_cycle(dry_run: bool = False) -> int:
         median_vph = channel["median_vph"] or 1500.0
 
         SignalTracker.emit_progress(
-            "radar_youtube",
-            ch_idx,
-            len(channels),
-            f"Canal {ch_idx}/{len(channels)}: Analisando '{channel_name}'"
+            "radar_youtube", ch_idx, len(channels), f"Canal {ch_idx}/{len(channels)}: Analisando '{channel_name}'"
         )
-        logger.info(f"Varrendo canal '{channel_name}'...", extra={"event": "radar_scan_channel", "channel": channel_name})
+        logger.info(
+            f"Varrendo canal '{channel_name}'...", extra={"event": "radar_scan_channel", "channel": channel_name}
+        )
         feed_entries = fetch_channel_feed(rss_url, channel_ref=channel["youtube_channel_id"])
 
         for entry in feed_entries:
@@ -253,14 +295,14 @@ def run_radar_cycle(dry_run: bool = False) -> int:
                 # Se já está QUALIFICADO mas ainda não foi baixado, realiza o download
                 if cand_status == "QUALIFIED" and not existing_candidate.get("downloaded_at"):
                     if not dry_run and downloads_count < settings.MAX_DOWNLOADS_PER_CYCLE:
-                        if process_candidate_download(yt_id, title=existing_candidate.get("title", ""), vph=existing_candidate.get("vph", 0)):
+                        if process_candidate_download(
+                            yt_id, title=existing_candidate.get("title", ""), vph=existing_candidate.get("vph", 0)
+                        ):
                             downloads_count += 1
                             time.sleep(5.0)
                         else:
                             time.sleep(2.0)
                     continue
-
-
 
             # 2. Coleta métricas analíticas
             metrics = fetch_video_metrics(yt_id)
@@ -274,7 +316,7 @@ def run_radar_cycle(dry_run: bool = False) -> int:
                     "view_count": 0,
                     "like_count": 0,
                     "comment_count": 0,
-                    "source": "rss_fallback"
+                    "source": "rss_fallback",
                 }
 
             pub_dt = metrics["published_at"]
@@ -285,41 +327,52 @@ def run_radar_cycle(dry_run: bool = False) -> int:
             if not settings.RADAR_DISABLE_HYPE_FILTERS and age_hours < settings.RADAR_MIN_AGE_HOURS:
                 logger.debug(f"Vídeo {yt_id} muito recente ({age_hours:.1f}h). Aguardando maturação de métricas.")
                 with get_db() as conn:
-                    conn.cursor().execute("""
+                    conn.cursor().execute(
+                        """
                         INSERT INTO radar_candidates (source_channel_id, youtube_id, title, published_at, status, last_checked_at)
                         VALUES (?, ?, ?, ?, 'MONITORING', datetime('now'))
                         ON CONFLICT(youtube_id) DO UPDATE SET last_checked_at = datetime('now');
-                    """, (channel_id, yt_id, metrics["title"], pub_dt.isoformat()))
+                    """,
+                        (channel_id, yt_id, metrics["title"], pub_dt.isoformat()),
+                    )
                 continue
 
             vph = calculate_vph(metrics["view_count"], pub_dt, reference_time=now_utc)
             median_factor = calculate_median_factor(vph, median_vph)
             duration = metrics["duration_seconds"]
             engagement_ratio = calculate_engagement_ratio(
-                metrics["view_count"],
-                metrics["like_count"],
-                metrics["comment_count"]
+                metrics["view_count"], metrics["like_count"], metrics["comment_count"]
             )
 
             # Vídeos excessivamente antigos (> 7 dias) são descartados se os filtros estiverem ativos
             max_cutoff_hours = settings.RADAR_IGNORE_AFTER_DAYS * 24.0
             if not settings.RADAR_DISABLE_HYPE_FILTERS and age_hours > max_cutoff_hours:
                 with get_db() as conn:
-                    conn.cursor().execute("""
+                    conn.cursor().execute(
+                        """
                         INSERT INTO radar_candidates (source_channel_id, youtube_id, title, published_at, status, reject_reason)
                         VALUES (?, ?, ?, ?, 'REJECTED', 'Vídeo com idade acima de 7 dias')
                         ON CONFLICT(youtube_id) DO UPDATE SET status = 'REJECTED', reject_reason = 'Idade > 7d';
-                    """, (channel_id, yt_id, metrics["title"], pub_dt.isoformat()))
+                    """,
+                        (channel_id, yt_id, metrics["title"], pub_dt.isoformat()),
+                    )
                 continue
 
             # Se está entre 48h e 7 dias, só filtra se os filtros estiverem ativos
-            if not settings.RADAR_DISABLE_HYPE_FILTERS and age_hours > settings.RADAR_MAX_AGE_HOURS and vph < (vph_threshold * 1.2):
+            if (
+                not settings.RADAR_DISABLE_HYPE_FILTERS
+                and age_hours > settings.RADAR_MAX_AGE_HOURS
+                and vph < (vph_threshold * 1.2)
+            ):
                 with get_db() as conn:
-                    conn.cursor().execute("""
+                    conn.cursor().execute(
+                        """
                         INSERT INTO radar_candidates (source_channel_id, youtube_id, title, published_at, status, reject_reason)
                         VALUES (?, ?, ?, ?, 'REJECTED', 'Idade > 48h sem VPH extraordinário')
                         ON CONFLICT(youtube_id) DO UPDATE SET status = 'REJECTED', reject_reason = 'Idade > 48h';
-                    """, (channel_id, yt_id, metrics["title"], pub_dt.isoformat()))
+                    """,
+                        (channel_id, yt_id, metrics["title"], pub_dt.isoformat()),
+                    )
                 continue
 
             # 3. Gatilhos de Decisão
@@ -334,10 +387,17 @@ def run_radar_cycle(dry_run: bool = False) -> int:
             if is_long_enough and is_viral:
                 logger.info(
                     f"🎬 VÍDEO QUALIFICADO PARA CORTE: '{metrics['title']}' (Duração: {duration // 60}m, VPH: {vph}, Modo Sem Filtros={settings.RADAR_DISABLE_HYPE_FILTERS})",
-                    extra={"event": "video_qualified", "youtube_id": yt_id, "vph": vph, "factor": median_factor, "engagement": engagement_ratio}
+                    extra={
+                        "event": "video_qualified",
+                        "youtube_id": yt_id,
+                        "vph": vph,
+                        "factor": median_factor,
+                        "engagement": engagement_ratio,
+                    },
                 )
                 with get_db() as conn:
-                    conn.cursor().execute("""
+                    conn.cursor().execute(
+                        """
                         INSERT INTO radar_candidates (
                             source_channel_id, youtube_id, title, published_at, duration_seconds,
                             view_count, like_count, comment_count, vph, median_factor,
@@ -348,14 +408,27 @@ def run_radar_cycle(dry_run: bool = False) -> int:
                             median_factor = excluded.median_factor,
                             status = 'QUALIFIED',
                             qualified_at = datetime('now');
-                    """, (channel_id, yt_id, metrics["title"], pub_dt.isoformat(), duration,
-                          metrics["view_count"], metrics["like_count"], metrics["comment_count"],
-                          vph, median_factor))
+                    """,
+                        (
+                            channel_id,
+                            yt_id,
+                            metrics["title"],
+                            pub_dt.isoformat(),
+                            duration,
+                            metrics["view_count"],
+                            metrics["like_count"],
+                            metrics["comment_count"],
+                            vph,
+                            median_factor,
+                        ),
+                    )
 
                 # 4. Ação: Download seletivo e Extração de Inteligência
                 if not dry_run:
                     if downloads_count < settings.MAX_DOWNLOADS_PER_CYCLE:
-                        if process_candidate_download(yt_id, title=metrics["title"], vph=vph, engagement_ratio=engagement_ratio):
+                        if process_candidate_download(
+                            yt_id, title=metrics["title"], vph=vph, engagement_ratio=engagement_ratio
+                        ):
                             downloads_count += 1
                             time.sleep(5.0)
                         else:
@@ -370,7 +443,8 @@ def run_radar_cycle(dry_run: bool = False) -> int:
                     reject_reason.append(f"Abaixo do threshold de hype (VPH: {vph} < {vph_threshold})")
 
                 with get_db() as conn:
-                    conn.cursor().execute("""
+                    conn.cursor().execute(
+                        """
                         INSERT INTO radar_candidates (
                             source_channel_id, youtube_id, title, published_at, duration_seconds,
                             view_count, vph, median_factor, status, reject_reason, last_checked_at
@@ -380,21 +454,31 @@ def run_radar_cycle(dry_run: bool = False) -> int:
                             status = 'REJECTED',
                             reject_reason = excluded.reject_reason,
                             last_checked_at = datetime('now');
-                    """, (channel_id, yt_id, metrics["title"], pub_dt.isoformat(), duration,
-                          metrics["view_count"], vph, median_factor, "; ".join(reject_reason)))
+                    """,
+                        (
+                            channel_id,
+                            yt_id,
+                            metrics["title"],
+                            pub_dt.isoformat(),
+                            duration,
+                            metrics["view_count"],
+                            vph,
+                            median_factor,
+                            "; ".join(reject_reason),
+                        ),
+                    )
 
     # 5. Processa candidatos qualificados pendentes no banco (fila contínua de Finanças/Fitness)
     if not dry_run and downloads_count < settings.MAX_DOWNLOADS_PER_CYCLE:
         downloads_count = download_pending_qualified_candidates(
-            downloads_count=downloads_count,
-            max_downloads=settings.MAX_DOWNLOADS_PER_CYCLE,
-            dry_run=dry_run
+            downloads_count=downloads_count, max_downloads=settings.MAX_DOWNLOADS_PER_CYCLE, dry_run=dry_run
         )
 
     msg_finish = f"Ciclo finalizado. Vídeos baixados para corte: {downloads_count}"
     record_heartbeat("radar_youtube", "OK", msg_finish)
     SignalTracker.emit_finish("radar_youtube", msg_finish, success=True, metadata={"downloads": downloads_count})
     return downloads_count
+
 
 def main():
     parser = argparse.ArgumentParser(description="Radar de Hype YouTube")
@@ -416,7 +500,9 @@ def main():
         for ch in channels:
             status_icon = "🟢" if ch["active"] else "🔴"
             print(f"{status_icon} [ID {ch['id']}] {ch['name']} (Channel ID: {ch['youtube_channel_id']})")
-            print(f"   VPH Mínimo: {ch['vph_absolute_threshold']} | Duração Mínima: {ch['min_duration_minutes']} min | Licença: {ch['license_mode']}")
+            print(
+                f"   VPH Mínimo: {ch['vph_absolute_threshold']} | Duração Mínima: {ch['min_duration_minutes']} min | Licença: {ch['license_mode']}"
+            )
             print(f"   Feed: {ch['rss_url']}\n")
         return
 
@@ -424,10 +510,7 @@ def main():
         print(f"Resolvendo e adicionando canal '{args.add_channel}'...")
         try:
             ch = add_source_channel(
-                args.add_channel,
-                name=args.name,
-                min_duration_minutes=args.min_duration,
-                vph_threshold=args.vph
+                args.add_channel, name=args.name, min_duration_minutes=args.min_duration, vph_threshold=args.vph
             )
             print(f"✅ Canal adicionado com sucesso! [ID {ch['id']}] {ch['name']} ({ch['youtube_channel_id']})")
         except Exception as e:
@@ -456,6 +539,7 @@ def main():
             time.sleep(5)
         else:
             time.sleep(settings.RADAR_INTERVAL_MINUTES * 60)
+
 
 if __name__ == "__main__":
     main()

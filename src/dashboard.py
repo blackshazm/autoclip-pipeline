@@ -3,19 +3,21 @@ Dashboard Web Local em Tempo Real para Acompanhamento do Pipeline de Cortes.
 Executa em http://localhost:8085 sem dependências externas (usa http.server nativo).
 Design System Dark Neon Glassmorphism com Terminal de Logs, Hero Card e Ações Rápidas.
 """
+
 import http.server
-import socketserver
 import json
 import urllib.parse
+import html
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from src.core.config import settings
 from src.core.database import get_db
 
-PORT = 8085
+HOST = getattr(settings, "DASHBOARD_HOST", "127.0.0.1")
+PORT = getattr(settings, "DASHBOARD_PORT", 8085)
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="pt-BR">
@@ -1786,23 +1788,37 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </html>
 """
 
+
 class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
-        # Rota de streaming de vídeos
+        # Rota de streaming de vídeos (com proteção contra Path Traversal)
         if path.startswith("/media/"):
-            clip_name = path.replace("/media/", "")
-            clip_file = settings.OUTPUT_DIR / clip_name
+            raw_clip_name = path[len("/media/") :]
+            clip_name = urllib.parse.unquote(raw_clip_name)
+            base_dir = Path(settings.OUTPUT_DIR).resolve()
+            try:
+                clip_file = (base_dir / clip_name).resolve()
+                if not clip_file.is_relative_to(base_dir):
+                    self.send_error(403, "Acesso proibido")
+                    return
+            except (ValueError, Exception):
+                self.send_error(400, "Caminho inválido")
+                return
+
             if clip_file.exists() and clip_file.is_file():
                 self.send_response(200)
                 self.send_header("Content-Type", "video/mp4")
                 self.send_header("Content-Length", str(clip_file.stat().st_size))
                 self.send_header("Accept-Ranges", "bytes")
                 self.end_headers()
-                with open(clip_file, "rb") as f:
-                    self.copyfile(f, self.wfile)
+                try:
+                    with open(clip_file, "rb") as f:
+                        self.copyfile(f, self.wfile)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
                 return
             else:
                 self.send_error(404, "Vídeo não encontrado")
@@ -1811,13 +1827,30 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
         # Rota de API: Leitura de Logs ao Vivo
         if path == "/api/logs":
             query = urllib.parse.parse_qs(parsed.query)
-            service = query.get("service", ["robot2_publish"])[0]
-            lines_count = int(query.get("lines", [35])[0])
+            service = query.get("service", ["media_processor"])[0]
+            try:
+                lines_count = int(query.get("lines", [35])[0])
+            except (ValueError, TypeError):
+                lines_count = 35
+            lines_count = max(10, min(lines_count, 500))
 
             # Sanitização do nome do arquivo
-            safe_services = ["robot2_publish", "robot1_ingest", "radar_youtube", "llm_copywriter", "dashboard"]
+            safe_services = [
+                "robot1_ingest",
+                "media_processor",
+                "radar_youtube",
+                "dashboard",
+                "watchdog",
+                "pub_yt_financas",
+                "pub_yt_fitness",
+                "pub_tk_financas",
+                "pub_tk_fitness",
+                "llm_copywriter",
+                "robot2_publish",
+                "downloader",
+            ]
             if service not in safe_services:
-                service = "robot2_publish"
+                service = "media_processor"
 
             log_file = Path(settings.LOG_DIR) / f"{service}.log"
             lines: List[str] = []
@@ -1825,7 +1858,7 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 try:
                     with open(log_file, "r", encoding="utf-8", errors="replace") as f:
                         all_lines = f.readlines()
-                        lines = [l.strip() for l in all_lines[-lines_count:] if l.strip()]
+                        lines = [line.strip() for line in all_lines[-lines_count:] if line.strip()]
                 except Exception as e:
                     lines = [f"Erro ao ler log: {e}"]
 
@@ -1844,7 +1877,9 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                     cur.execute("SELECT min_interval_minutes FROM publishing_accounts WHERE active = 1 LIMIT 1")
                     row = cur.fetchone()
                     cur_mins = row["min_interval_minutes"] if row and row["min_interval_minutes"] else 15
-                self._send_json({"ok": True, "interval_minutes": cur_mins, "message": f"Intervalo atual: {cur_mins} min"})
+                self._send_json(
+                    {"ok": True, "interval_minutes": cur_mins, "message": f"Intervalo atual: {cur_mins} min"}
+                )
             return
 
         # Rota de API: Reagendamento Imediato (Suporta GET e POST)
@@ -1855,6 +1890,7 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
         # Rota de API: Sinais em Tempo Real dos Processos
         if path == "/api/signals":
             from src.core.process_signals import SignalTracker
+
             signals = SignalTracker.get_all_signals()
             self._send_json({"ok": True, "signals": signals})
             return
@@ -1862,6 +1898,7 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
         # Rota de API: Status dos Robôs e Telemetria de RAM
         if path == "/api/robots/status":
             from src.core.pipeline_control import PipelineController
+
             statuses = PipelineController.get_all_statuses()
             self._send_json({"ok": True, **statuses})
             return
@@ -1890,26 +1927,34 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
             total_rescheduled = 0
             with get_db() as conn:
                 cur = conn.cursor()
-                cur.execute("""
+                cur.execute(
+                    """
                     UPDATE publishing_accounts
                     SET min_interval_minutes = ?, posting_windows = ?
                     WHERE active = 1;
-                """, (minutes, windows_json))
+                """,
+                    (minutes, windows_json),
+                )
 
                 # Reagenda automaticamente toda a fila SCHEDULED com o novo intervalo
                 now_utc = datetime.now(timezone.utc)
                 for platform in ["youtube", "tiktok"]:
-                    cur.execute("""
+                    cur.execute(
+                        """
                         SELECT id, clip_id FROM publications
                         WHERE platform = ? AND status = 'SCHEDULED'
                         ORDER BY id ASC;
-                    """, (platform,))
+                    """,
+                        (platform,),
+                    )
                     rows = cur.fetchall()
 
                     # Se o YouTube estiver com limite diário excedido, reagenda a partir de 24h
                     base_time = now_utc
                     if platform == "youtube":
-                        cur.execute("SELECT count(*) as c FROM publications WHERE platform = 'youtube' AND (status = 'FAILED_QUOTA' OR error_message LIKE '%limite diário%');")
+                        cur.execute(
+                            "SELECT count(*) as c FROM publications WHERE platform = 'youtube' AND (status = 'FAILED_QUOTA' OR error_message LIKE '%limite diário%');"
+                        )
                         if cur.fetchone()["c"] > 0:
                             base_time = now_utc + timedelta(hours=24)
 
@@ -1919,17 +1964,23 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                         else:
                             slot_iso = (base_time + timedelta(minutes=idx * minutes)).isoformat()
 
-                        cur.execute("""
+                        cur.execute(
+                            """
                             UPDATE publications
                             SET scheduled_for = ?, lease_owner = NULL, lease_expires_at = NULL
                             WHERE id = ?;
-                        """, (slot_iso, row["id"]))
+                        """,
+                            (slot_iso, row["id"]),
+                        )
 
-                        cur.execute("""
+                        cur.execute(
+                            """
                             UPDATE clips
                             SET scheduled_for = ?
                             WHERE id = ?;
-                        """, (slot_iso, row["clip_id"]))
+                        """,
+                            (slot_iso, row["clip_id"]),
+                        )
                         total_rescheduled += 1
 
                 conn.commit()
@@ -1941,20 +1992,25 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 if env_path.exists():
                     content_env = env_path.read_text(encoding="utf-8")
                     import re
+
                     if "POST_INTERVAL_MINUTES=" in content_env:
-                        content_env = re.sub(r"POST_INTERVAL_MINUTES=\d+", f"POST_INTERVAL_MINUTES={minutes}", content_env)
+                        content_env = re.sub(
+                            r"POST_INTERVAL_MINUTES=\d+", f"POST_INTERVAL_MINUTES={minutes}", content_env
+                        )
                     else:
                         content_env += f"\nPOST_INTERVAL_MINUTES={minutes}\n"
                     env_path.write_text(content_env, encoding="utf-8")
             except Exception as env_err:
                 print(f"Aviso ao salvar .env: {env_err}")
 
-            self._send_json({
-                "ok": True,
-                "interval_minutes": minutes,
-                "rescheduled": total_rescheduled,
-                "message": f"Intervalo configurado para {minutes} min e {total_rescheduled} vídeos reorganizados na fila!"
-            })
+            self._send_json(
+                {
+                    "ok": True,
+                    "interval_minutes": minutes,
+                    "rescheduled": total_rescheduled,
+                    "message": f"Intervalo configurado para {minutes} min e {total_rescheduled} vídeos reorganizados na fila!",
+                }
+            )
         except Exception as e:
             self._send_json({"ok": False, "error": str(e)}, status=400)
 
@@ -1970,11 +2026,14 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 total_rescheduled = 0
 
                 for platform in ["youtube", "tiktok"]:
-                    cur.execute("""
+                    cur.execute(
+                        """
                         SELECT id, clip_id FROM publications
                         WHERE platform = ? AND status = 'SCHEDULED'
                         ORDER BY id ASC;
-                    """, (platform,))
+                    """,
+                        (platform,),
+                    )
                     rows = cur.fetchall()
 
                     base_time = now_utc
@@ -1985,17 +2044,23 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                         else:
                             slot_iso = (base_time + timedelta(minutes=idx * interval_min)).isoformat()
 
-                        cur.execute("""
+                        cur.execute(
+                            """
                             UPDATE publications
                             SET scheduled_for = ?, lease_owner = NULL, lease_expires_at = NULL
                             WHERE id = ?;
-                        """, (slot_iso, row["id"]))
+                        """,
+                            (slot_iso, row["id"]),
+                        )
 
-                        cur.execute("""
+                        cur.execute(
+                            """
                             UPDATE clips
                             SET scheduled_for = ?
                             WHERE id = ?;
-                        """, (slot_iso, row["clip_id"]))
+                        """,
+                            (slot_iso, row["clip_id"]),
+                        )
                         total_rescheduled += 1
 
                 conn.commit()
@@ -2008,11 +2073,12 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
-        from src.services.channel_manager import add_source_channel, delete_source_channel, toggle_channel_status
+        from src.services.channel_manager import add_source_channel, delete_source_channel
 
         # 0. Controle de Robôs e Pausa
         if path == "/api/robots/toggle":
             from src.core.pipeline_control import PipelineController
+
             query = urllib.parse.parse_qs(parsed.query)
             service = query.get("service", [None])[0]
             if not service:
@@ -2034,6 +2100,7 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/api/robots/pause_all":
             from src.core.pipeline_control import PipelineController
+
             PipelineController.pause_all(reason="dashboard_button")
             statuses = PipelineController.get_all_statuses()
             self._send_json({"ok": True, **statuses})
@@ -2041,6 +2108,7 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/api/robots/resume_all":
             from src.core.pipeline_control import PipelineController
+
             PipelineController.resume_all()
             statuses = PipelineController.get_all_statuses()
             self._send_json({"ok": True, **statuses})
@@ -2058,11 +2126,14 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 with get_db() as conn:
                     cur = conn.cursor()
-                    cur.execute("""
+                    cur.execute(
+                        """
                         UPDATE publications
                         SET scheduled_for = ?, status = 'SCHEDULED', lease_owner = NULL, lease_expires_at = NULL
                         WHERE id = ?;
-                    """, (now_iso, int(pub_id)))
+                    """,
+                        (now_iso, int(pub_id)),
+                    )
                     conn.commit()
                 self._send_json({"ok": True, "id": pub_id})
             except Exception as e:
@@ -2075,12 +2146,15 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 with get_db() as conn:
                     cur = conn.cursor()
-                    cur.execute("""
+                    cur.execute(
+                        """
                         UPDATE publications
                         SET status = 'SCHEDULED', error_message = NULL, scheduled_for = ?,
                             lease_owner = NULL, lease_expires_at = NULL
                         WHERE status = 'FAILED';
-                    """, (now_iso,))
+                    """,
+                        (now_iso,),
+                    )
                     count = cur.rowcount
                     conn.commit()
                 self._send_json({"ok": True, "count": count})
@@ -2115,6 +2189,7 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/radar/trigger_download":
             try:
                 from src.radar_youtube import download_pending_qualified_candidates
+
                 downloaded = download_pending_qualified_candidates(downloads_count=0, max_downloads=3, dry_run=False)
                 self._send_json({"ok": True, "downloaded": downloaded})
             except Exception as e:
@@ -2181,7 +2256,7 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
             cursor = conn.cursor()
             tz_local = ZoneInfo(settings.TIMEZONE)
             now_utc = datetime.now(timezone.utc)
-            now_local = datetime.now(tz_local)
+            datetime.now(tz_local)
 
             # 1. Métricas Gerais
             cursor.execute("SELECT COUNT(*) as cnt FROM long_videos;")
@@ -2198,25 +2273,34 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
 
             # Limite diário configurado
             max_daily = getattr(settings, "YOUTUBE_DAILY_UPLOAD_LIMIT", 100)
-            cursor.execute("SELECT max_daily_posts FROM publishing_accounts WHERE platform='tiktok' AND active=1 LIMIT 1;")
+            cursor.execute(
+                "SELECT max_daily_posts FROM publishing_accounts WHERE platform='tiktok' AND active=1 LIMIT 1;"
+            )
             r_tt = cursor.fetchone()
             max_daily_tiktok = r_tt["max_daily_posts"] if r_tt and r_tt["max_daily_posts"] else 50
 
-            progress_pct = min(100, int(((total_posted_youtube + total_posted_tiktok) / (max_daily + max_daily_tiktok)) * 100)) if (max_daily + max_daily_tiktok) > 0 else 0
+            progress_pct = (
+                min(100, int(((total_posted_youtube + total_posted_tiktok) / (max_daily + max_daily_tiktok)) * 100))
+                if (max_daily + max_daily_tiktok) > 0
+                else 0
+            )
 
             # Disco
             from src.services.cleanup import get_disk_usage_percent
+
             disk_pct = get_disk_usage_percent(settings.BASE_DIR)
             disk_color = "#34d399" if disk_pct < 70 else ("#fbbf24" if disk_pct < 85 else "#f87171")
 
             # 2. Hero Card: Próximo Disparo do YouTube
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT p.id, p.platform, c.clip_uid, c.title, c.virality_score, c.tags, p.scheduled_for
                 FROM publications p
                 JOIN clips c ON p.clip_id = c.id
                 WHERE p.platform = 'youtube' AND p.status = 'SCHEDULED'
                 ORDER BY p.scheduled_for ASC LIMIT 1;
-            """)
+            """
+            )
             next_pub = cursor.fetchone()
 
             if next_pub:
@@ -2225,19 +2309,21 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                     sched_dt = sched_dt.replace(tzinfo=timezone.utc)
                 sched_local = sched_dt.astimezone(tz_local)
                 diff_min = int((sched_dt - now_utc).total_seconds() / 60)
-                
+
                 countdown_str = f"Em {diff_min} min" if diff_min > 0 else "Na agulha (Agora)"
                 time_str = sched_local.strftime("%H:%M")
 
                 tags_list = json.loads(next_pub["tags"]) if next_pub["tags"] else ["#shorts"]
-                tags_html = " ".join([f"<span style='color: var(--cyan); margin-right: 6px;'>{t}</span>" for t in tags_list[:4]])
-
+                tags_html = " ".join(
+                    [f"<span style='color: var(--cyan); margin-right: 6px;'>{html.escape(t)}</span>" for t in tags_list[:4]]
+                )
+                hero_title_escaped = html.escape(next_pub["title"] or "")
                 next_hero_html = f"""
                 <div class="hero-banner">
                     <div class="hero-content">
                         <div class="hero-info">
                             <div class="hero-badge-tag">🎯 Próximo Disparo YouTube Shorts</div>
-                            <h2 class="hero-title">{next_pub['title']}</h2>
+                            <h2 class="hero-title">{hero_title_escaped}</h2>
                             <div class="hero-meta">
                                 <span>🔥 <strong>{next_pub['virality_score']}</strong> Viral Score</span>
                                 <span>🕒 Previsto para: <strong style="color: #fff;">{time_str}</strong></span>
@@ -2272,7 +2358,8 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
             # Ordenação inteligente:
             # - Itens ativos (agendados, enviando, falhas) ordenados cronologicamente (scheduled_for ASC)
             # - Itens já postados (POSTED) ordenados do mais recente para o mais antigo (scheduled_for DESC)
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT p.id, p.platform, c.clip_uid, c.title, p.status, p.scheduled_for, p.external_id, p.error_message
                 FROM publications p
                 JOIN clips c ON p.clip_id = c.id
@@ -2280,7 +2367,8 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                     CASE WHEN p.status = 'POSTED' THEN 1 ELSE 0 END ASC,
                     CASE WHEN p.status = 'POSTED' THEN p.scheduled_for END DESC,
                     p.scheduled_for ASC;
-            """)
+            """
+            )
             pubs = cursor.fetchall()
 
             pubs_html = ""
@@ -2317,13 +2405,18 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 except Exception:
                     pass
 
-                raw_title = p["title"] or p["clip_uid"]
+                raw_title = p["title"] or p["clip_uid"] or ""
                 title_disp = raw_title
                 if len(title_disp) > 42:
                     title_disp = title_disp[:42] + "..."
 
-                title_attr = raw_title.replace('"', '&quot;')
-                search_terms = f"{raw_title} {p['clip_uid']} {p['platform']} {st} {ext_id}".replace('"', '').replace("'", "").lower()
+                title_attr = html.escape(raw_title, quote=True)
+                title_disp_escaped = html.escape(title_disp)
+                search_terms = (
+                    f"{raw_title} {p['clip_uid']} {p['platform']} {st} {ext_id}".replace('"', "")
+                    .replace("'", "")
+                    .lower()
+                )
 
                 pub_id = p["id"]
                 action_html = ""
@@ -2331,16 +2424,20 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                     pill = '<span class="tag-pill" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">✅ PUBLICADO</span>'
                     if p["platform"] == "youtube" and ext_id:
                         yt_link = f"https://youtube.com/shorts/{ext_id}"
-                        action_html = f'<a href="{yt_link}" target="_blank" class="btn-secondary btn-success">▶️ Abrir Short</a>'
+                        action_html = (
+                            f'<a href="{yt_link}" target="_blank" class="btn-secondary btn-success">▶️ Abrir Short</a>'
+                        )
                     else:
                         action_html = '<span style="font-size: 12px; color: var(--text-dim);">-</span>'
                 elif st == "UPLOADING":
                     pill = '<span class="tag-pill" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; font-weight:700;">🚀 ENVIANDO...</span>'
                     action_html = '<span style="font-size: 12px; color: #a855f7;">Em andamento</span>'
                 elif st == "FAILED":
-                    err_clean = err.replace('"', '&quot;')
+                    err_clean = html.escape(err, quote=True)
                     pill = f'<span class="tag-pill" style="background: rgba(239, 68, 68, 0.2); color: #f87171; cursor:pointer;" title="{err_clean}">❌ FALHOU</span>'
-                    action_html = f'<button onclick="publishNow({pub_id})" class="btn-secondary btn-danger">🔄 Re-tentar</button>'
+                    action_html = (
+                        f'<button onclick="publishNow({pub_id})" class="btn-secondary btn-danger">🔄 Re-tentar</button>'
+                    )
                 else:
                     pill = '<span class="tag-pill" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd;">⏳ AGENDADO</span>'
                     action_html = f'<button onclick="publishNow({pub_id})" class="btn-secondary" title="Disparar no próximo ciclo">⚡ Postar Já</button>'
@@ -2350,7 +2447,7 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 pubs_html += f"""
                 <tr data-status="{f_class}" data-platform="{p['platform']}" data-search="{search_terms}">
                     <td><strong>{platform_icon}</strong></td>
-                    <td title="{title_attr}">{title_disp}</td>
+                    <td title="{title_attr}">{title_disp_escaped}</td>
                     <td>{pill}</td>
                     <td style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #f8fafc;">{sched_str}</td>
                     <td style="text-align: right;">{action_html}</td>
@@ -2358,7 +2455,9 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 """
 
             # 4. Status de Saúde dos Robôs (Heartbeats)
-            cursor.execute("SELECT service_name, last_ping, status, extra_info FROM system_heartbeats ORDER BY last_ping DESC;")
+            cursor.execute(
+                "SELECT service_name, last_ping, status, extra_info FROM system_heartbeats ORDER BY last_ping DESC;"
+            )
             beats = cursor.fetchall()
             beats_html = ""
             has_bugged_worker = False
@@ -2367,7 +2466,7 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "radar_youtube": "Radar de Hype",
                 "robot1_ingest": "Robô 1: Ingestor",
                 "robot2_publish": "Robô 2: Publicador",
-                "watchdog": "Watchdog Guardião"
+                "watchdog": "Watchdog Guardião",
             }
 
             for b in beats:
@@ -2390,13 +2489,13 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
 
                 friendly_name = name_map.get(s_name, s_name)
 
-                if diff_sec < 300: # < 5 min
+                if diff_sec < 300:  # < 5 min
                     dot_color = "#10b981"
                     status_pill = f'<span class="tag-pill" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">🟢 ATIVO ({int(diff_sec)}s)</span>'
-                elif diff_sec < 900: # 5 a 15 min
+                elif diff_sec < 900:  # 5 a 15 min
                     dot_color = "#f59e0b"
                     status_pill = f'<span class="tag-pill" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">🟡 ESPERA ({int(diff_sec//60)}m)</span>'
-                else: # > 15 min
+                else:  # > 15 min
                     dot_color = "#ef4444"
                     has_bugged_worker = True
                     status_pill = '<span class="tag-pill" style="background: rgba(239, 68, 68, 0.2); color: #ef4444; font-weight:700;">🔴 INATIVO</span>'
@@ -2439,7 +2538,8 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 """
 
             # 5.5. Estoque de Mídia & Fila por Nicho
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT 
                     pa.niche,
                     SUM(CASE WHEN p.status = 'SCHEDULED' THEN 1 ELSE 0 END) as scheduled_count,
@@ -2447,10 +2547,12 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 FROM publications p
                 JOIN publishing_accounts pa ON p.publishing_account_id = pa.id
                 GROUP BY pa.niche;
-            """)
+            """
+            )
             niche_stock = {r["niche"]: dict(r) for r in cursor.fetchall()}
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT 
                     sc.niche,
                     COUNT(*) as qual_count
@@ -2460,7 +2562,8 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                   AND (rc.downloaded_at IS NULL OR rc.downloaded_at = '')
                   AND rc.youtube_id NOT IN (SELECT youtube_id FROM long_videos WHERE youtube_id IS NOT NULL)
                 GROUP BY sc.niche;
-            """)
+            """
+            )
             radar_qual = {r["niche"]: r["qual_count"] for r in cursor.fetchall()}
 
             fin_ready = (niche_stock.get("financas") or {}).get("scheduled_count") or 0
@@ -2517,7 +2620,9 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
             """
 
             # 6. Canais Monitorados pelo Radar
-            cursor.execute("SELECT id, name, youtube_channel_id, active, vph_absolute_threshold FROM source_channels ORDER BY active DESC, id ASC;")
+            cursor.execute(
+                "SELECT id, name, youtube_channel_id, active, vph_absolute_threshold FROM source_channels ORDER BY active DESC, id ASC;"
+            )
             channels = cursor.fetchall()
             channels_html = ""
             for ch in channels:
@@ -2535,12 +2640,14 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 """
 
             # 7. Amostra de Vídeos em 9:16
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT id, clip_uid, file_path, virality_score, title
                 FROM clips
                 WHERE file_path IS NOT NULL
                 ORDER BY id DESC LIMIT 4;
-            """)
+            """
+            )
             clips_sample = cursor.fetchall()
             cards_html = ""
             for c in clips_sample:
@@ -2565,7 +2672,9 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
             # 8. Frequência de Postagem Ativa
             cursor.execute("SELECT MIN(min_interval_minutes) as m FROM publishing_accounts WHERE active = 1;")
             row_int = cursor.fetchone()
-            current_interval = row_int["m"] if row_int and row_int["m"] else getattr(settings, "POST_INTERVAL_MINUTES", 15)
+            current_interval = (
+                row_int["m"] if row_int and row_int["m"] else getattr(settings, "POST_INTERVAL_MINUTES", 15)
+            )
 
             btn_15 = "btn-secondary btn-success" if current_interval == 15 else "btn-secondary"
             btn_30 = "btn-secondary btn-success" if current_interval == 30 else "btn-secondary"
@@ -2601,8 +2710,9 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
 
             # 8.5. Painel de Controle de Robôs & Escudo de Memória RAM
             from src.core.pipeline_control import PipelineController
+
             ctrl_status = PipelineController.get_all_statuses()
-            c_all = ctrl_status["controls"].get("all", {})
+            ctrl_status["controls"].get("all", {})
             c_radar = ctrl_status["controls"].get("radar_youtube", {})
             c_r1 = ctrl_status["controls"].get("robot1_ingest", {})
             c_media = ctrl_status["controls"].get("media_processor", {})
@@ -2631,7 +2741,7 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
             yt_fit_paused = c_yt_fit.get("is_paused", False)
             tk_fin_paused = c_tk_fin.get("is_paused", False)
             tk_fit_paused = c_tk_fit.get("is_paused", False)
-            copy_paused = c_copy.get("is_paused", False)
+            c_copy.get("is_paused", False)
 
             btn_radar_cls = "is-paused" if radar_paused else ""
             btn_radar_act = "▶️ Retomar" if radar_paused else "⏸️ Pausar"
@@ -2654,8 +2764,6 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
             btn_tk_fit_cls = "is-paused" if tk_fit_paused else ""
             btn_tk_fit_act = "▶️ Retomar" if tk_fit_paused else "⏸️ Pausar"
 
-            btn_copy_cls = "is-paused" if copy_paused else ""
-            btn_copy_act = "▶️ Retomar" if copy_paused else "⏸️ Pausar"
 
             robot_controls_html = f"""
             <div class="robot-controls-card">
@@ -2742,16 +2850,25 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
 
             # 9. Sinais e Telemetria em Tempo Real dos Processos
             from src.core.process_signals import SignalTracker
+
             active_signals = SignalTracker.get_all_signals()
             signals_cards_html = ""
             for s in active_signals:
-                pct = min(100, int((s["current_step"] / max(1, s["total_steps"])) * 100)) if s["total_steps"] > 0 else (100 if s["status"] == "COMPLETED" else 0)
+                pct = (
+                    min(100, int((s["current_step"] / max(1, s["total_steps"])) * 100))
+                    if s["total_steps"] > 0
+                    else (100 if s["status"] == "COMPLETED" else 0)
+                )
                 badge_class = s["status"].lower()
                 badge_label = "OCIOSO"
-                if s["status"] == "RUNNING": badge_label = f"EM EXECUÇÃO ({pct}%)"
-                elif s["status"] == "COMPLETED": badge_label = "CONCLUÍDO"
-                elif s["status"] == "FAILED": badge_label = "FALHOU"
-                elif s["status"] == "PAUSED": badge_label = "PAUSADO"
+                if s["status"] == "RUNNING":
+                    badge_label = f"EM EXECUÇÃO ({pct}%)"
+                elif s["status"] == "COMPLETED":
+                    badge_label = "CONCLUÍDO"
+                elif s["status"] == "FAILED":
+                    badge_label = "FALHOU"
+                elif s["status"] == "PAUSED":
+                    badge_label = "PAUSADO"
 
                 time_str = s["last_updated"].replace("T", " ")[11:19] if s["last_updated"] else "--:--:--"
                 extra_link = ""
@@ -2815,18 +2932,32 @@ class PipelineDashboardHandler(http.server.SimpleHTTPRequestHandler):
             content = content.replace("{{TOTAL_PUBS_COUNT}}", str(len(pubs)))
             content = content.replace("{{TOTAL_FAILED}}", str(failed_count))
             content = content.replace("{{FAILED_RETRY_DISPLAY}}", "inline-flex" if failed_count > 0 else "none")
-            content = content.replace("{{PUBLICATIONS_ROWS}}", pubs_html or "<tr><td colspan='5' style='text-align:center;'>Nenhuma publicação registrada.</td></tr>")
-            content = content.replace("{{HEARTBEATS_ROWS}}", beats_html or "<tr><td colspan='4' style='text-align:center;'>Sem heartbeats.</td></tr>")
-            content = content.replace("{{CHANNELS_ROWS}}", channels_html or "<tr><td colspan='4' style='text-align:center;'>Nenhum canal monitorado.</td></tr>")
-            content = content.replace("{{CLIPS_CARDS}}", cards_html or "<p style='color:var(--text-muted);'>Nenhum corte renderizado ainda.</p>")
+            content = content.replace(
+                "{{PUBLICATIONS_ROWS}}",
+                pubs_html or "<tr><td colspan='5' style='text-align:center;'>Nenhuma publicação registrada.</td></tr>",
+            )
+            content = content.replace(
+                "{{HEARTBEATS_ROWS}}",
+                beats_html or "<tr><td colspan='4' style='text-align:center;'>Sem heartbeats.</td></tr>",
+            )
+            content = content.replace(
+                "{{CHANNELS_ROWS}}",
+                channels_html or "<tr><td colspan='4' style='text-align:center;'>Nenhum canal monitorado.</td></tr>",
+            )
+            content = content.replace(
+                "{{CLIPS_CARDS}}",
+                cards_html or "<p style='color:var(--text-muted);'>Nenhum corte renderizado ainda.</p>",
+            )
 
             return content
 
+
 def run_dashboard():
-    handler = PipelineDashboardHandler
-    with http.server.ThreadingHTTPServer(("", PORT), handler) as httpd:
-        print(f"[*] Dashboard Web ativo em http://localhost:{PORT}")
-        httpd.serve_forever()
+    import uvicorn
+
+    print(f"[*] Centro de Controle Web (FastAPI + HTMX + Alpine.js) ativo em http://{HOST}:{PORT}")
+    uvicorn.run("src.web.app:app", host=HOST, port=PORT, log_level="info")
+
 
 if __name__ == "__main__":
     run_dashboard()

@@ -2,7 +2,9 @@
 Módulo de Detecção e Filtragem de Sobreposição Temporal entre Cortes (Anti-Overlap).
 Impede a publicação de múltiplos cortes que compartilham essencialmente o mesmo trecho do vídeo longo.
 """
+
 from typing import List, Dict, Any, Tuple, Optional
+
 
 def parse_seconds(val: Any) -> float:
     """Converte segundos ou formato MM:SS / HH:MM:SS para float."""
@@ -25,6 +27,7 @@ def parse_seconds(val: Any) -> float:
         return 0.0
     return 0.0
 
+
 def calculate_overlap_ratio(start_a: float, end_a: float, start_b: float, end_b: float) -> float:
     """
     Calcula a taxa de sobreposição relativa entre dois intervalos temporais:
@@ -40,11 +43,14 @@ def calculate_overlap_ratio(start_a: float, end_a: float, start_b: float, end_b:
 
     return intersection / min_duration
 
-def filter_overlapping_clips(clips: List[Dict[str, Any]], max_overlap_threshold: float = 0.25) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+
+def filter_overlapping_clips(
+    clips: List[Dict[str, Any]], max_overlap_threshold: float = 0.25
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Filtra clips do mesmo vídeo longo descartando duplicatas temporais.
     Prioriza o clip com maior virality_score.
-    
+
     Retorna: (kept_clips, discarded_clips)
     """
     # Agrupa por vídeo longo
@@ -66,7 +72,7 @@ def filter_overlapping_clips(clips: List[Dict[str, Any]], max_overlap_threshold:
         sorted_clips = sorted(
             v_clips,
             key=lambda x: (float(x.get("virality_score") or 0), parse_seconds(x.get("duration_seconds"))),
-            reverse=True
+            reverse=True,
         )
 
         accepted_in_video: List[Dict[str, Any]] = []
@@ -88,7 +94,9 @@ def filter_overlapping_clips(clips: List[Dict[str, Any]], max_overlap_threshold:
                 overlap = calculate_overlap_ratio(c_start, c_end, a_start, a_end)
                 if overlap > max_overlap_threshold:
                     has_overlap = True
-                    candidate["_overlap_reason"] = f"Sobreposição de {int(overlap * 100)}% com corte mais viral ({accepted.get('id') or accepted.get('clip_uid')})"
+                    candidate["_overlap_reason"] = (
+                        f"Sobreposição de {int(overlap * 100)}% com corte mais viral ({accepted.get('id') or accepted.get('clip_uid')})"
+                    )
                     discarded.append(candidate)
                     break
 
@@ -99,10 +107,9 @@ def filter_overlapping_clips(clips: List[Dict[str, Any]], max_overlap_threshold:
 
     return kept, discarded
 
+
 def round_robin_interleave(
-    items: List[Dict[str, Any]], 
-    group_key: str = "long_video_id",
-    secondary_key: Optional[str] = "source_channel_id"
+    items: List[Dict[str, Any]], group_key: str = "long_video_id", secondary_key: Optional[str] = "source_channel_id"
 ) -> List[Dict[str, Any]]:
     """
     Reorganiza a lista de cortes utilizando intercalação Round-Robin.
@@ -122,11 +129,11 @@ def round_robin_interleave(
         groups[k] = sorted(
             groups[k],
             key=lambda x: (
-                0 if x.get("series_id") else 1, # Séries primeiro se houver
+                0 if x.get("series_id") else 1,  # Séries primeiro se houver
                 x.get("part_number") or 1,
-                float(x.get("virality_score") or 0)
+                float(x.get("virality_score") or 0),
             ),
-            reverse=False # Séries em ordem crescente de partes
+            reverse=False,  # Séries em ordem crescente de partes
         )
         # Se não for série, ordena por virality_score DESC
         non_series = [x for x in groups[k] if not x.get("series_id")]
@@ -163,10 +170,9 @@ def round_robin_interleave(
 
     return result
 
+
 def filter_against_database(
-    clips: List[Dict[str, Any]], 
-    conn: Optional[Any] = None, 
-    max_overlap_threshold: float = 0.25
+    clips: List[Dict[str, Any]], conn: Optional[Any] = None, max_overlap_threshold: float = 0.25
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Filtra clips candidatos comparando contra cortes JÁ EXISTENTES no banco de dados
@@ -216,8 +222,10 @@ def filter_against_database(
                 if overlap > max_overlap_threshold:
                     has_overlap = True
                     ex_dict = dict(ex)
-                    ex_ref = ex_dict.get('title') or ex_dict.get('clip_uid')
-                    cand["_overlap_reason"] = f"Sobreposição de {int(overlap * 100)}% com corte histórico existente ID {ex_dict.get('id')} ({ex_ref})"
+                    ex_ref = ex_dict.get("title") or ex_dict.get("clip_uid")
+                    cand["_overlap_reason"] = (
+                        f"Sobreposição de {int(overlap * 100)}% com corte histórico existente ID {ex_dict.get('id')} ({ex_ref})"
+                    )
                     discarded.append(cand)
                     break
 
@@ -231,4 +239,3 @@ def filter_against_database(
             check_with_connection(local_conn)
 
     return kept, discarded
-

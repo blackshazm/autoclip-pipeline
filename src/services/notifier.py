@@ -1,9 +1,9 @@
 """
 Serviço de Notificações via Webhooks (Discord e Telegram) e DLQ.
 """
+
 from typing import Optional, Dict, Any
 import requests
-import json
 import hashlib
 import sqlite3
 from datetime import datetime, timezone
@@ -14,6 +14,7 @@ from src.core.database import get_db
 
 logger = get_logger("notifier")
 
+
 def send_discord_notification(title: str, message: str, color: int = 0x00FF00, fields: Optional[list] = None) -> bool:
     """Envia mensagem formatada com Embed no Discord."""
     webhook_url = settings.DISCORD_WEBHOOK_URL
@@ -22,14 +23,16 @@ def send_discord_notification(title: str, message: str, color: int = 0x00FF00, f
         return False
 
     payload = {
-        "embeds": [{
-            "title": title,
-            "description": message,
-            "color": color,
-            "fields": fields or [],
-            "footer": {"text": "Pipeline Autônomo de Cortes • Hermes & Supoclip"},
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }]
+        "embeds": [
+            {
+                "title": title,
+                "description": message,
+                "color": color,
+                "fields": fields or [],
+                "footer": {"text": "Pipeline Autônomo de Cortes • Hermes & Supoclip"},
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
     }
 
     try:
@@ -38,6 +41,7 @@ def send_discord_notification(title: str, message: str, color: int = 0x00FF00, f
     except Exception as e:
         logger.error(f"Erro ao enviar webhook Discord: {e}")
         return False
+
 
 def send_telegram_notification(message: str) -> bool:
     """Envia notificação de texto via Telegram Bot."""
@@ -48,11 +52,7 @@ def send_telegram_notification(message: str) -> bool:
         return False
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
+    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
 
     try:
         res = requests.post(url, json=payload, timeout=10)
@@ -60,6 +60,7 @@ def send_telegram_notification(message: str) -> bool:
     except Exception as e:
         logger.error(f"Erro ao enviar notificação Telegram: {e}")
         return False
+
 
 def notify_published_clip(clip_data: Dict[str, Any], platform_links: Dict[str, str]) -> None:
     """Dispara notificação de publicação comemorativa com métricas de virality score."""
@@ -72,17 +73,39 @@ def notify_published_clip(clip_data: Dict[str, Any], platform_links: Dict[str, s
     send_discord_notification(title, desc, color=0x3498DB)
     send_telegram_notification(f"*{title}*\nScore: `{score}/100`\n\n{links_text}")
 
-def notify_alert(severity: str, source: str, title: str, message: str, conn: Optional[sqlite3.Connection] = None) -> None:
+
+def notify_supoclip_job_completed(
+    job_id: str,
+    video_title: str,
+    total_clips: int,
+    qualified_clips: int,
+    top_score: int,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
+    """Dispara notificação comemorativa quando a fábrica do Supoclip conclui o fatiamento de cortes."""
+    title = f"✂️ Supoclip Concluído: {video_title[:45]}"
+    desc = (
+        f"**Vídeo:** `{video_title}`\n"
+        f"**Job ID:** `{job_id}`\n"
+        f"**Cortes Gerados:** `{total_clips}`\n"
+        f"**Aprovados (>= {settings.MIN_VIRALITY_SCORE}):** `{qualified_clips}`\n"
+        f"**Maior Virality Score:** `{top_score}/100`"
+    )
+    logger.info(
+        f"Supoclip concluído ({job_id}) para '{video_title}': {total_clips} cortes gerados, {qualified_clips} aprovados."
+    )
+    send_discord_notification(title, desc, color=0x2ECC71)
+    send_telegram_notification(f"*{title}*\n\n{desc.replace('**', '*')}")
+
+
+def notify_alert(
+    severity: str, source: str, title: str, message: str, conn: Optional[sqlite3.Connection] = None
+) -> None:
     """Registra alerta no banco e envia notificação de incidente com severidade apropriada."""
-    import sqlite3
     fingerprint = hashlib.md5(f"{source}_{title}".encode("utf-8")).hexdigest()
 
     # Cores no Discord: CRITICAL (Vermelho), WARNING (Amarelo), INFO (Azul)
-    color_map = {
-        "CRITICAL": 0xE74C3C,
-        "WARNING": 0xF1C40F,
-        "INFO": 0x3498DB
-    }
+    color_map = {"CRITICAL": 0xE74C3C, "WARNING": 0xF1C40F, "INFO": 0x3498DB}
     color = color_map.get(severity.upper(), 0x95A5A6)
 
     # Persiste na tabela alerts evitando spam duplicado

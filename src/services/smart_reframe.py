@@ -4,11 +4,12 @@ Modo Híbrido:
 - 1 Pessoa Detectada (Solo): Formato Smart Headroom (foco no rosto com 20% de respiro superior).
 - 2 ou Mais Pessoas (Diálogo/Debate): Formato Blurred Background Fit (vídeo 16:9 completo no centro + fundo desfocado).
 """
+
 import subprocess
 import shutil
 import time
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional
 
 try:
     import cv2
@@ -51,6 +52,7 @@ def detect_speaker_count(video_path: Path, max_samples: int = 5) -> int:
 
     try:
         import mediapipe as mp
+
         # MediaPipe Face Detection (modelo 0 para rostos próximos/médios)
         mp_face = mp.solutions.face_detection
         with mp_face.FaceDetection(model_selection=0, min_detection_confidence=0.45) as detector:
@@ -88,7 +90,9 @@ def detect_speaker_count(video_path: Path, max_samples: int = 5) -> int:
 
     # Se na maioria dos frames válidos ou em pelo menos 2 frames foram vistos 2 ou mais rostos
     multi_person_frames = [c for c in face_counts if c >= 2]
-    if len(multi_person_frames) >= 2 or (len(face_counts) > 0 and max(face_counts) >= 2 and len(multi_person_frames) >= len(face_counts) / 2):
+    if len(multi_person_frames) >= 2 or (
+        len(face_counts) > 0 and max(face_counts) >= 2 and len(multi_person_frames) >= len(face_counts) / 2
+    ):
         logger.info(f"Cena de diálogo com múltiplos interlocutores detectada em {video_path.name}: {face_counts}")
         return 2
 
@@ -144,7 +148,9 @@ def apply_smart_reframe(clip_path: Path, mode_override: Optional[str] = None) ->
     # mantém o enquadramento original de IA do Supoclip que já foca perfeitamente nos rostos.
     is_horizontal = w > h
     if not is_horizontal and not mode_override:
-        logger.info(f"Vídeo {clip_path.name} já está em formato vertical 9:16 ({w}x{h}) com enquadramento facial da IA. Reframe ignorado para preservar os rostos e a qualidade.")
+        logger.info(
+            f"Vídeo {clip_path.name} já está em formato vertical 9:16 ({w}x{h}) com enquadramento facial da IA. Reframe ignorado para preservar os rostos e a qualidade."
+        )
         return True
 
     chosen_mode = mode_override or getattr(settings, "REFRAME_MODE", "hybrid")
@@ -165,17 +171,27 @@ def apply_smart_reframe(clip_path: Path, mode_override: Optional[str] = None) ->
     temp_output = clip_path.with_suffix(".reframe.tmp.mp4")
 
     cmd = [
-        "ffmpeg", "-y",
-        "-i", str(clip_path),
-        "-filter_complex", filter_complex,
-        "-map", "[v]",
-        "-map", "0:a?",
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "22",
-        "-c:a", "copy",
-        "-movflags", "+faststart",
-        str(temp_output)
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(clip_path),
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        "[v]",
+        "-map",
+        "0:a?",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "22",
+        "-c:a",
+        "copy",
+        "-movflags",
+        "+faststart",
+        str(temp_output),
     ]
 
     start_time = time.time()
@@ -199,7 +215,7 @@ def apply_smart_reframe(clip_path: Path, mode_override: Optional[str] = None) ->
         elapsed = round(time.time() - start_time, 2)
         logger.info(
             f"Smart Reframe concluído para {clip_path.name} em {elapsed}s (Modo: {active_mode}).",
-            extra={"event": "smart_reframe_applied", "mode": active_mode, "elapsed": elapsed}
+            extra={"event": "smart_reframe_applied", "mode": active_mode, "elapsed": elapsed},
         )
         return True
 

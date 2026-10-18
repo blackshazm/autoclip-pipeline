@@ -95,3 +95,43 @@ def test_fill_tags_character_limit():
     # Não deve tentar adicionar todas as 100 tags, pois para antes dos 480 caracteres
     assert added_count < len(tags_longas)
     assert added_count > 0
+
+
+def test_set_coppa_audience_success():
+    """Valida que o método _set_coppa_audience confirma com sucesso quando a validação indica marcado."""
+    publisher = YouTubeBrowserPublisherPro()
+    mock_page = MagicMock()
+    mock_locator = MagicMock()
+    mock_locator.count.return_value = 1
+    mock_page.locator.return_value.first = mock_locator
+    
+    # page.evaluate mock: first calls return None/True, then validation check returns expected status
+    def evaluate_side_effect(script, *args):
+        if "checkStatus" in str(script):
+            return {"targetChecked": True, "oppChecked": False}
+        return True
+
+    mock_page.evaluate.side_effect = evaluate_side_effect
+
+    res = publisher._set_coppa_audience(mock_page, is_made_for_kids=False)
+    assert res is True
+
+
+def test_set_coppa_audience_unconfirmed_fallback():
+    """Valida comportamento resiliente quando validação falha em confirmar marcação."""
+    publisher = YouTubeBrowserPublisherPro()
+    mock_page = MagicMock()
+    mock_locator = MagicMock()
+    mock_locator.count.return_value = 0
+    mock_page.locator.return_value.first = mock_locator
+
+    def evaluate_side_effect(script, *args):
+        if "checkStatus" in str(script):
+            return {"targetChecked": False, "oppChecked": False}
+        return False
+
+    mock_page.evaluate.side_effect = evaluate_side_effect
+
+    res = publisher._set_coppa_audience(mock_page, is_made_for_kids=False)
+    assert res is False
+

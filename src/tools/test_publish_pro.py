@@ -3,6 +3,7 @@ Ferramenta CLI de Teste Autônomo para o Robô de Postagem PRO (YouTube Shorts).
 Permite executar uploads com todos os metadados avançados sem interferir
 no banco de dados ou nos workers em produção.
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -11,10 +12,10 @@ from datetime import datetime
 # Adiciona o diretório raiz ao sys.path
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 if str(BASE_DIR) not in sys.path:
-    sys.path.insert(0, str(BASE_DIR))
+    sys.path.insert(0, str(BASE_DIR))  # noqa: E402
 
-from src.services.youtube_browser_publisher_pro import YouTubeBrowserPublisherPro, PublishPayloadPro
-from src.core.logger import get_logger
+from src.services.youtube_browser_publisher_pro import YouTubeBrowserPublisherPro, PublishPayloadPro  # noqa: E402
+from src.core.logger import get_logger  # noqa: E402
 
 logger = get_logger("test_publish_pro")
 
@@ -29,10 +30,21 @@ def main():
     parser.add_argument("--language", type=str, default="Português (Brasil)", help="Idioma original")
     parser.add_argument("--ai", action="store_true", help="Marcar como conteúdo sintético / gerado por IA")
     parser.add_argument("--related", type=str, default=None, help="Termo ou ID de vídeo relacionado")
-    parser.add_argument("--mode", choices=["PUBLIC", "SCHEDULE", "UNLISTED", "PRIVATE"], default="PUBLIC", help="Visibilidade")
-    parser.add_argument("--schedule", type=str, default=None, help="Data/Hora para agendamento (ISO: YYYY-MM-DDTHH:MM:SS)")
-    parser.add_argument("--headless", type=lambda x: (str(x).lower() == 'true'), default=False, help="Executar em modo headless (padrão: False)")
-    parser.add_argument("--niche", choices=["financas", "fitness", "geral"], default=None, help="Nicho do canal (financas ou fitness)")
+    parser.add_argument(
+        "--mode", choices=["PUBLIC", "SCHEDULE", "UNLISTED", "PRIVATE"], default="PUBLIC", help="Visibilidade"
+    )
+    parser.add_argument(
+        "--schedule", type=str, default=None, help="Data/Hora para agendamento (ISO: YYYY-MM-DDTHH:MM:SS)"
+    )
+    parser.add_argument(
+        "--headless",
+        type=lambda x: (str(x).lower() == "true"),
+        default=False,
+        help="Executar em modo headless (padrão: False)",
+    )
+    parser.add_argument(
+        "--niche", choices=["financas", "fitness", "geral"], default=None, help="Nicho do canal (financas ou fitness)"
+    )
     parser.add_argument("--profile-dir", type=str, default=None, help="Caminho customizado de perfil do Chrome")
     parser.add_argument("--state-file", type=str, default=None, help="Caminho customizado do state JSON de cookies")
     parser.add_argument("--channel-id", type=str, default=None, help="ID do canal no YouTube Studio")
@@ -72,10 +84,7 @@ def main():
 
     logger.info(f"Iniciando instância de teste PRO (Nicho: {args.niche or 'Padrão'})...")
     publisher = YouTubeBrowserPublisherPro(
-        profile_dir=profile_path,
-        state_file=state_path,
-        headless=args.headless,
-        channel_id=args.channel_id
+        profile_dir=profile_path, state_file=state_path, headless=args.headless, channel_id=args.channel_id
     )
 
     if not publisher.is_authenticated():
@@ -95,7 +104,7 @@ def main():
         related_video_query=args.related,
         publish_mode=args.mode,
         schedule_datetime=schedule_dt,
-        clip_uid="cli_test_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        clip_uid="cli_test_" + datetime.now().strftime("%Y%m%d_%H%M%S"),
     )
 
     try:

@@ -99,3 +99,23 @@ def test_ram_conflict_shield_detection():
 
     # Após concluir/remover, volta a ser False
     assert PipelineController.is_clip_processing_active() is False
+
+
+def test_init_controls_table_memoization(monkeypatch):
+    """Garante que init_controls_table memoiza a inicialização e não repete DDL/DML a cada checagem."""
+    from src.core.pipeline_control import _initialized_dbs
+    import src.core.pipeline_control as pc
+
+    _initialized_dbs.clear()
+    assert len(_initialized_dbs) == 0
+
+    # Primeira chamada inicializa e adiciona o DB ao set
+    init_controls_table()
+    assert len(_initialized_dbs) == 1
+
+    # Chamadas repetidas via is_paused não devem invocar get_db para DDL
+    with patch("src.core.pipeline_control.get_db", wraps=pc.get_db) as mock_db:
+        assert PipelineController.is_paused("radar_youtube") is False
+        # Somente 1 conexão aberta (pelo SELECT de is_paused), zero chamadas DDL pelo init
+        assert mock_db.call_count == 1
+

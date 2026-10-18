@@ -1,21 +1,42 @@
 """
 Serviço de Download de Vídeos Longos via yt-dlp com Proteção Anti-Bot.
 """
+
+import re
 import subprocess
 import shutil
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from src.core.config import settings
 from src.core.logger import get_logger
-from src.services.media_validator import inspect_media_file, verify_media_integrity
+from src.services.media_validator import verify_media_integrity
 
 logger = get_logger("downloader")
+
+YOUTUBE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{11}$")
+
+
+def _cleanup_temp_files(dest_dir: Path, youtube_id: str):
+    """Remove resíduos temporários (.temp.*, .part, etc.) deixados pelo yt-dlp."""
+    try:
+        for temp_f in dest_dir.glob(f"{youtube_id}.temp.*"):
+            temp_f.unlink(missing_ok=True)
+    except Exception as e:
+        logger.warning(f"Erro ao limpar arquivos temporários para {youtube_id}: {e}")
+
 
 def download_youtube_video(youtube_id: str, output_dir: Optional[Path] = None) -> Optional[Path]:
     """
     Baixa um vídeo do YouTube em qualidade 720p/1080p usando yt-dlp de forma segura e atômica.
     """
+    if not youtube_id or not YOUTUBE_ID_PATTERN.match(str(youtube_id)):
+        logger.error(
+            f"ID de vídeo inválido rejeitado: '{youtube_id}'. Esperado exatamente 11 caracteres alfanuméricos.",
+            extra={"event": "invalid_youtube_id", "youtube_id": str(youtube_id)},
+        )
+        return None
+
     dest_dir = output_dir or settings.WATCH_DIR
     dest_dir.mkdir(parents=True, exist_ok=True)
 
@@ -29,46 +50,61 @@ def download_youtube_video(youtube_id: str, output_dir: Optional[Path] = None) -
     url = f"https://www.youtube.com/watch?v={youtube_id}"
 
     import sys
+
     cmd = [
         sys.executable,
-        "-m", "yt_dlp",
-        "--js-runtimes", "node",
-        "--format", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
-        "--merge-output-format", "mp4",
-        "--output", temp_template,
+        "-m",
+        "yt_dlp",
+        "--js-runtimes",
+        "node",
+        "--format",
+        "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+        "--merge-output-format",
+        "mp4",
+        "--output",
+        temp_template,
         "--no-playlist",
         "--no-warnings",
-        "--limit-rate", "15M",  # Prevenção contra bloqueio por banda excessiva
-        url
+        "--limit-rate",
+        "15M",  # Prevenção contra bloqueio por banda excessiva
+        "--extractor-args",
+        "youtube:player_client=android,web",
+        url,
     ]
 
-    # Injeta cookies se o arquivo existir (procura cookies atualizados do canal ou geral)
-    cookies_target = None
+    # Injeta cookies se o arquivo existir (prioriza o arquivo mais recentemente atualizado)
     config_dir = Path("./config")
-    for candidate_cookie in [settings.YTDLP_COOKIES_PATH, config_dir / "cookies_fitness.txt", config_dir / "cookies_financas.txt"]:
-        if candidate_cookie.exists() and candidate_cookie.stat().st_size > 0:
-            cookies_target = candidate_cookie
-            break
+    cookie_candidates = [
+        config_dir / "cookies_fitness.txt",
+        config_dir / "cookies_financas.txt",
+        Path(settings.YTDLP_COOKIES_PATH),
+    ]
+    valid_cookies = [c for c in cookie_candidates if c.exists() and c.stat().st_size > 0]
+    cookies_target = max(valid_cookies, key=lambda c: c.stat().st_mtime) if valid_cookies else None
 
     if cookies_target:
         cmd.extend(["--cookies", str(cookies_target)])
-        logger.debug(f"Utilizando {cookies_target.name} para autenticação do yt-dlp.")
+        logger.debug(f"Utilizando {cookies_target.name} (atualizado em {cookies_target.stat().st_mtime}) para yt-dlp.")
 
-    logger.info(f"Iniciando download do vídeo {youtube_id}...", extra={"event": "download_start", "youtube_id": youtube_id})
+    logger.info(
+        f"Iniciando download do vídeo {youtube_id}...", extra={"event": "download_start", "youtube_id": youtube_id}
+    )
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
         if result.returncode != 0:
             logger.error(
                 f"Falha no download yt-dlp para {youtube_id}: {result.stderr}",
-                extra={"event": "download_error", "youtube_id": youtube_id}
+                extra={"event": "download_error", "youtube_id": youtube_id},
             )
+            _cleanup_temp_files(dest_dir, youtube_id)
             return None
 
         # Procura o arquivo gerado com o prefixo temp
         candidates = list(dest_dir.glob(f"{youtube_id}.temp.*"))
         if not candidates:
             logger.error(f"Arquivo de download não localizado para {youtube_id}")
+            _cleanup_temp_files(dest_dir, youtube_id)
             return None
 
         temp_file = candidates[0]
@@ -79,20 +115,24 @@ def download_youtube_video(youtube_id: str, output_dir: Optional[Path] = None) -
         if not verify_media_integrity(final_file):
             logger.error(f"Arquivo baixado corrompido: {final_file}")
             final_file.unlink(missing_ok=True)
+            _cleanup_temp_files(dest_dir, youtube_id)
             return None
 
         logger.info(
             f"Download de {youtube_id} concluído com sucesso: {final_file.name}",
-            extra={"event": "download_success", "youtube_id": youtube_id, "size_bytes": final_file.stat().st_size}
+            extra={"event": "download_success", "youtube_id": youtube_id, "size_bytes": final_file.stat().st_size},
         )
         return final_file
     except FileNotFoundError:
         logger.error("yt-dlp executável não encontrado durante execução.")
+        _cleanup_temp_files(dest_dir, youtube_id)
         return None
 
     except subprocess.TimeoutExpired:
         logger.error(f"Timeout ao baixar vídeo {youtube_id}")
+        _cleanup_temp_files(dest_dir, youtube_id)
         return None
     except Exception as e:
         logger.error(f"Exceção inesperada no download de {youtube_id}: {e}")
+        _cleanup_temp_files(dest_dir, youtube_id)
         return None

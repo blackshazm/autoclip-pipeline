@@ -10,6 +10,7 @@ Módulo autônomo com preenchimento avançado e completo de metadados no YouTube
 - Agendamento de Data/Hora (Schedule) ou Publicação Imediata
 - Auditoria com screenshots de cada etapa e Double-Check HTTP
 """
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +32,7 @@ logger = get_logger("youtube_browser_publisher_pro")
 @dataclass
 class PublishPayloadPro:
     """Modelo de dados tipado para publicação avançada no YouTube Studio."""
+
     video_path: Path
     title: str
     description: str
@@ -58,7 +60,7 @@ class YouTubeBrowserPublisherPro:
         profile_dir: Optional[Path] = None,
         state_file: Optional[Path] = None,
         headless: Optional[bool] = None,
-        channel_id: Optional[str] = None
+        channel_id: Optional[str] = None,
     ):
         self.profile_dir = profile_dir or settings.YOUTUBE_BROWSER_PROFILE_DIR
         self.state_file = state_file or settings.YOUTUBE_BROWSER_STATE_FILE
@@ -125,11 +127,12 @@ class YouTubeBrowserPublisherPro:
             "button:has-text('Show more')",
             "ytcp-button:has-text('Mostrar mais')",
             "ytcp-button:has-text('Show more')",
-            "#details ytcp-button.ytcp-video-metadata-editor"
+            "#details ytcp-button.ytcp-video-metadata-editor",
         ]
-        
+
         # 1. Tenta via evaluate com busca textual ampla
-        expanded = page.evaluate("""() => {
+        expanded = page.evaluate(
+            """() => {
             const btns = Array.from(document.querySelectorAll('ytcp-button, button'));
             for (const b of btns) {
                 const txt = (b.innerText || '').toLowerCase();
@@ -140,7 +143,8 @@ class YouTubeBrowserPublisherPro:
                 }
             }
             return false;
-        }""")
+        }"""
+        )
         if expanded:
             time.sleep(1.5)
             return True
@@ -157,19 +161,42 @@ class YouTubeBrowserPublisherPro:
         logger.warning("Não foi possível acionar 'Mostrar mais'. Pode já estar expandido.")
         return False
 
+    def _dismiss_overlays(self, page: Page) -> None:
+        """Fecha diálogos, avisos ou popups que possam cobrir a interface do Studio."""
+        dialog_selectors = [
+            "ytcp-auth-confirmation-dialog #confirm-button",
+            "ytcp-auth-confirmation-dialog #dismiss-button",
+            "ytcp-confirmation-dialog #confirm-button",
+            "ytcp-dialog #close-button",
+            "tp-yt-paper-dialog button[aria-label='Fechar']",
+            "tp-yt-paper-dialog #dismiss-button",
+        ]
+        for sel in dialog_selectors:
+            try:
+                btn = page.locator(sel).first
+                if btn.count() > 0 and btn.is_visible():
+                    logger.info(f"Dispensando diálogo modal detectado ({sel})...")
+                    self._safe_click(btn, timeout_ms=2000)
+                    time.sleep(1)
+            except Exception:
+                pass
+
     def _fill_tags(self, page: Page, tags: List[str]) -> int:
         """Preenche o campo nativo de Tags do YouTube Studio (até 500 caracteres)."""
         if not tags:
             return 0
 
+        self._dismiss_overlays(page)
         logger.info(f"Preenchendo tags oficiais no YouTube Studio ({len(tags)} tags)...")
         # Rola a página para a região das tags
-        page.evaluate("""() => {
+        page.evaluate(
+            """() => {
             const el = document.querySelector('#tags-container') 
                     || document.querySelector('input[aria-label="Tags"]') 
                     || document.querySelector('input[aria-label="Marcadores"]');
             if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' });
-        }""")
+        }"""
+        )
         time.sleep(1)
 
         tag_input = page.locator(
@@ -182,7 +209,10 @@ class YouTubeBrowserPublisherPro:
 
         tags_added = 0
         current_len = 0
-        tag_input.click(timeout=4000)
+        try:
+            self._safe_click(tag_input, timeout_ms=3000)
+        except Exception:
+            pass
 
         for t in tags:
             clean_tag = t.strip().lstrip("#")
@@ -208,9 +238,10 @@ class YouTubeBrowserPublisherPro:
         logger.info(f"Configurando declaração de conteúdo gerado por IA: {is_ai}")
         # YouTube pergunta: "Conteúdo alterado ou sintético? Sim / Não"
         radio_name = "YES" if is_ai else "NO"
-        
+
         # Executa via script no DOM
-        success = page.evaluate("""(targetVal) => {
+        success = page.evaluate(
+            """(targetVal) => {
             // Procura containers de altered content
             const radios = Array.from(document.querySelectorAll('tp-yt-paper-radio-button'));
             for (const r of radios) {
@@ -225,7 +256,9 @@ class YouTubeBrowserPublisherPro:
                 }
             }
             return false;
-        }""", radio_name)
+        }""",
+            radio_name,
+        )
 
         if not success:
             # Fallback procurando pelo label
@@ -236,6 +269,153 @@ class YouTubeBrowserPublisherPro:
                 success = True
 
         return success
+
+    def _set_coppa_audience(self, page: Page, is_made_for_kids: bool = False) -> bool:
+        """
+        Define categoricamente o público COPPA no YouTube Studio (Conteúdo Infantil vs Não é para Crianças).
+        Realiza scroll no diálogo, usa locators Playwright que penetram Shadow DOM, varredura recursiva JS
+        e validação ativa pós-clique ('aria-checked' / 'iron-selected') para evitar categorização infantil indevida.
+        """
+        logger.info(f"Configurando público COPPA (Conteúdo Infantil={is_made_for_kids})...")
+        target_name = "VIDEO_MADE_FOR_KIDS_MFK" if is_made_for_kids else "VIDEO_MADE_FOR_KIDS_NOT_MFK"
+        opposite_name = "VIDEO_MADE_FOR_KIDS_NOT_MFK" if is_made_for_kids else "VIDEO_MADE_FOR_KIDS_MFK"
+
+        # 1. Rola o container do diálogo até o bloco de público (ytcp-audience-picker)
+        try:
+            page.evaluate(
+                """() => {
+                const scrollers = document.querySelectorAll('#scrollable-content, ytcp-uploads-dialog #scrollable-content, ytcp-video-metadata-editor');
+                for (const s of scrollers) {
+                    s.scrollTop = Math.min(s.scrollHeight, 600);
+                }
+                const picker = document.querySelector('ytcp-audience-picker, ytcp-video-metadata-editor-basics');
+                if (picker) {
+                    picker.scrollIntoView({ behavior: 'instant', block: 'center' });
+                }
+            }"""
+            )
+        except Exception:
+            pass
+        time.sleep(1)
+
+        confirmed = False
+        for attempt in range(3):
+            # Tentativa A: Locators Playwright nativos (penetram automaticamente Web Components e Shadow DOM)
+            selectors = [
+                f"tp-yt-paper-radio-button[name='{target_name}']",
+                f"[name='{target_name}']",
+                "#not-made-for-kids" if not is_made_for_kids else "#made-for-kids",
+                "tp-yt-paper-radio-button:has-text('Não é conteúdo para crianças')" if not is_made_for_kids else "tp-yt-paper-radio-button:has-text('Sim, é conteúdo para crianças')",
+                "tp-yt-paper-radio-button:has-text('Não, não é conteúdo para crianças')" if not is_made_for_kids else "tp-yt-paper-radio-button:has-text('Sim, é conteúdo')",
+                "tp-yt-paper-radio-button:has-text('not made for kids')" if not is_made_for_kids else "tp-yt-paper-radio-button:has-text('made for kids')",
+                "#radioLabel:has-text('Não é conteúdo para crianças')" if not is_made_for_kids else "#radioLabel:has-text('Sim, é conteúdo para crianças')",
+                "#radioLabel:has-text('not made for kids')" if not is_made_for_kids else "#radioLabel:has-text('made for kids')",
+            ]
+
+            for sel in selectors:
+                try:
+                    loc = page.locator(sel).first
+                    if loc.count() > 0:
+                        loc.scroll_into_view_if_needed(timeout=2000)
+                        loc.click(force=True, timeout=2000)
+                        time.sleep(0.8)
+                        break
+                except Exception:
+                    pass
+
+            # Tentativa B: Script com busca recursiva em Shadow Roots
+            try:
+                page.evaluate(
+                    """(tName) => {
+                    function findAndClick(root) {
+                        const radios = root.querySelectorAll('tp-yt-paper-radio-button, [role="radio"]');
+                        for (const r of radios) {
+                            const name = (r.getAttribute('name') || '').toUpperCase();
+                            const txt = (r.innerText || r.textContent || '').toLowerCase();
+                            if (name === tName || 
+                                (tName.includes('NOT_MFK') && (txt.includes('não é conteúdo para crianças') || txt.includes('não, não é') || txt.includes('not made for kids'))) ||
+                                (!tName.includes('NOT_MFK') && (txt.includes('sim, é conteúdo') || txt.includes('yes, it')))) {
+                                r.scrollIntoView({ behavior: 'instant', block: 'center' });
+                                r.click();
+                                r.dispatchEvent(new Event('change', { bubbles: true }));
+                                return true;
+                            }
+                        }
+                        const all = root.querySelectorAll('*');
+                        for (const el of all) {
+                            if (el.shadowRoot) {
+                                if (findAndClick(el.shadowRoot)) return true;
+                            }
+                        }
+                        return false;
+                    }
+                    return findAndClick(document);
+                }""",
+                    target_name,
+                )
+            except Exception:
+                pass
+
+            time.sleep(1)
+
+            # Validação / Double-Check: Inspeciona se o botão target está de fato selecionado
+            validation = page.evaluate(
+                """(args) => {
+                const [tName, oppName] = args;
+                function checkStatus(root) {
+                    const radios = root.querySelectorAll('tp-yt-paper-radio-button, [role="radio"]');
+                    let targetChecked = false;
+                    let oppChecked = false;
+
+                    for (const r of radios) {
+                        const name = (r.getAttribute('name') || '').toUpperCase();
+                        const isChecked = r.getAttribute('aria-checked') === 'true' 
+                                       || r.classList.contains('iron-selected') 
+                                       || r.hasAttribute('checked');
+                        if (name === tName && isChecked) targetChecked = true;
+                        if (name === oppName && isChecked) oppChecked = true;
+                    }
+
+                    const all = root.querySelectorAll('*');
+                    for (const el of all) {
+                        if (el.shadowRoot) {
+                            const sub = checkStatus(el.shadowRoot);
+                            if (sub.targetChecked) targetChecked = true;
+                            if (sub.oppChecked) oppChecked = true;
+                        }
+                    }
+                    return { targetChecked, oppChecked };
+                }
+                return checkStatus(document);
+            }""",
+                [target_name, opposite_name],
+            )
+
+            if validation and validation.get("targetChecked") and not validation.get("oppChecked"):
+                logger.info(
+                    f"✓ Público COPPA confirmado com sucesso: {'Conteúdo Infantil' if is_made_for_kids else 'NÃO é conteúdo para crianças'}."
+                )
+                confirmed = True
+                break
+            else:
+                logger.warning(
+                    f"Aviso COPPA: Target marcado={validation.get('targetChecked') if validation else False}, Oposto={validation.get('oppChecked') if validation else False}. Repetindo tentativa {attempt + 1}..."
+                )
+                time.sleep(1)
+
+        if not confirmed and not is_made_for_kids:
+            screenshot_dir = settings.BASE_DIR / "logs" / "screenshots"
+            screenshot_dir.mkdir(parents=True, exist_ok=True)
+            diag_path = screenshot_dir / f"coppa_validation_warning_{int(time.time())}.png"
+            try:
+                page.screenshot(path=str(diag_path))
+            except Exception:
+                pass
+            logger.warning(
+                f"Aviso: Não foi possível certificar 100% que 'Não é para crianças' ficou selecionado. Screenshot salvo em {diag_path.name}"
+            )
+
+        return confirmed
 
     def _set_category(self, page: Page, category_name: Optional[str]) -> bool:
         """Define a categoria do vídeo no YouTube Studio se especificada."""
@@ -251,7 +431,7 @@ class YouTubeBrowserPublisherPro:
                 cat_dropdown.scroll_into_view_if_needed()
                 self._safe_click(cat_dropdown)
                 time.sleep(1)
-                
+
                 option = page.locator(f"ytcp-text-menu-item:has-text('{category_name}')").first
                 if option.count() > 0:
                     self._safe_click(option)
@@ -281,7 +461,7 @@ class YouTubeBrowserPublisherPro:
                 lang_trigger.scroll_into_view_if_needed()
                 self._safe_click(lang_trigger)
                 time.sleep(1)
-                
+
                 option = page.locator(f"ytcp-text-menu-item:has-text('{language_name}')").first
                 if option.count() > 0:
                     self._safe_click(option)
@@ -302,7 +482,8 @@ class YouTubeBrowserPublisherPro:
 
         # 1. Tenta clique nativo via DOM evaluate para evitar bloqueio por backdrops
         for _ in range(4):
-            adv = page.evaluate("""() => {
+            adv = page.evaluate(
+                """() => {
                 const btn = document.querySelector('#next-button') 
                          || document.querySelector('ytcp-button#next-button')
                          || document.querySelector('button#next-button');
@@ -311,7 +492,8 @@ class YouTubeBrowserPublisherPro:
                     return true;
                 }
                 return false;
-            }""")
+            }"""
+            )
             if adv:
                 time.sleep(2)
                 return True
@@ -366,20 +548,20 @@ class YouTubeBrowserPublisherPro:
             logger.warning(f"Não foi possível vincular vídeo relacionado '{query_or_id}': {e}")
         return False
 
-    def _wait_for_copyright_checks(self, page: Page, max_wait_sec: int = 45) -> Dict[str, Any]:
+    def _wait_for_copyright_checks(self, page: Page, max_wait_sec: int = 300) -> Dict[str, Any]:
         """
-        Monitora a aba de Verificações (Copyright & Diretrizes).
+        Monitora a aba de Verificações (Copyright & Diretrizes) por até 5 minutos (300s).
         Retorna status {'has_issues': bool, 'details': str}.
         """
-        logger.info("Aguardando verificação de Direitos Autorais (Checks)...")
+        logger.info(f"Aguardando verificação de Direitos Autorais (Checks) - limite de {max_wait_sec}s...")
         start_t = time.time()
-        
+
         while time.time() - start_t < max_wait_sec:
             content = page.content().lower()
             if "nenhum problema encontrado" in content or "no issues found" in content:
                 logger.info("Verificação de Copyright: Nenhum problema encontrado! (Aprovado)")
                 return {"has_issues": False, "details": "Nenhum problema encontrado"}
-            
+
             if "problema de direitos autorais" in content or "copyright claim" in content:
                 logger.warning("ALERTA: O YouTube detectou reivindicação de Direitos Autorais neste vídeo.")
                 return {"has_issues": True, "details": "Reivindicação de direitos autorais detectada"}
@@ -393,7 +575,8 @@ class YouTubeBrowserPublisherPro:
         """Clica em 'Avançar' até que a aba Visibilidade esteja de fato ativa na tela."""
         for attempt in range(max_retries):
             # Verifica se já está na aba de visibilidade (procura radios visíveis de PUBLIC/UNLISTED/PRIVATE)
-            is_vis = page.evaluate("""() => {
+            is_vis = page.evaluate(
+                """() => {
                 const radios = Array.from(document.querySelectorAll('tp-yt-paper-radio-button'));
                 for (const r of radios) {
                     const name = (r.getAttribute('name') || '').toUpperCase();
@@ -402,7 +585,8 @@ class YouTubeBrowserPublisherPro:
                     }
                 }
                 return false;
-            }""")
+            }"""
+            )
             if is_vis:
                 logger.info(f"Aba Visibilidade alcançada com sucesso (tentativa {attempt + 1})!")
                 time.sleep(1)
@@ -410,7 +594,8 @@ class YouTubeBrowserPublisherPro:
 
             logger.info(f"Clicando em 'Avançar' para alcançar a aba de Visibilidade (tentativa {attempt + 1})...")
             # Clica no botão Avançar
-            clicked = page.evaluate("""() => {
+            clicked = page.evaluate(
+                """() => {
                 const btns = Array.from(document.querySelectorAll('#next-button, button, ytcp-button'));
                 for (const b of btns) {
                     const txt = (b.innerText || '').trim();
@@ -420,21 +605,19 @@ class YouTubeBrowserPublisherPro:
                     }
                 }
                 return false;
-            }""")
+            }"""
+            )
             if not clicked:
-                next_btn = page.locator("#next-button, ytcp-button:has-text('Avançar'), button:has-text('Avançar')").first
+                next_btn = page.locator(
+                    "#next-button, ytcp-button:has-text('Avançar'), button:has-text('Avançar')"
+                ).first
                 if next_btn.count() > 0 and next_btn.is_visible():
                     self._safe_click(next_btn, timeout_ms=4000)
             time.sleep(2.5)
 
         return False
 
-    def _configure_visibility_or_schedule(
-        self,
-        page: Page,
-        mode: str,
-        schedule_dt: Optional[datetime]
-    ) -> bool:
+    def _configure_visibility_or_schedule(self, page: Page, mode: str, schedule_dt: Optional[datetime]) -> bool:
         """Configura a visibilidade (Público, Privado, Não-listado) ou agenda Data/Hora."""
         logger.info(f"Configurando visibilidade: Modo={mode}, Schedule={schedule_dt}")
         time.sleep(1.5)
@@ -463,7 +646,8 @@ class YouTubeBrowserPublisherPro:
                 return True
 
         target_mode = mode.upper()
-        marked = page.evaluate("""(target) => {
+        marked = page.evaluate(
+            """(target) => {
             const radios = Array.from(document.querySelectorAll('tp-yt-paper-radio-button'));
             for (const r of radios) {
                 const name = (r.getAttribute('name') || '').toUpperCase();
@@ -478,21 +662,129 @@ class YouTubeBrowserPublisherPro:
                 }
             }
             return false;
-        }""", target_mode)
+        }""",
+            target_mode,
+        )
 
         if not marked:
-            logger.warning(f"Aviso: Não foi possível marcar visibilidade {target_mode} via script DOM. Tentando locators...")
-            text_query = "Não listado" if target_mode == "UNLISTED" else ("Privado" if target_mode == "PRIVATE" else "Público")
-            radio_loc = page.locator(f"tp-yt-paper-radio-button:has-text('{text_query}'), tp-yt-paper-radio-button[name='{target_mode}']").first
+            logger.warning(
+                f"Aviso: Não foi possível marcar visibilidade {target_mode} via script DOM. Tentando locators..."
+            )
+            text_query = (
+                "Não listado" if target_mode == "UNLISTED" else ("Privado" if target_mode == "PRIVATE" else "Público")
+            )
+            radio_loc = page.locator(
+                f"tp-yt-paper-radio-button:has-text('{text_query}'), tp-yt-paper-radio-button[name='{target_mode}']"
+            ).first
             if radio_loc.count() > 0:
                 return self._safe_click(radio_loc, timeout_ms=5000, required=True)
             else:
                 screenshot_diag = settings.BASE_DIR / "logs" / "screenshots" / f"vis_diag_fail_{target_mode}.png"
                 page.screenshot(path=str(screenshot_diag))
-                raise YouTubePublishError(f"Opção de visibilidade '{target_mode}' não encontrada na tela. Screenshot salvo: {screenshot_diag.name}")
+                raise YouTubePublishError(
+                    f"Opção de visibilidade '{target_mode}' não encontrada na tela. Screenshot salvo: {screenshot_diag.name}"
+                )
 
         logger.info(f"Visibilidade '{target_mode}' selecionada com sucesso.")
         return True
+
+    def _handle_publish_anyway_dialog(self, page: Page, timeout_sec: int = 10) -> bool:
+        """
+        Detecta e clica no diálogo de aviso 'Ainda estamos verificando seu conteúdo' / 'Publish anyway'.
+        Sem essa confirmação, o YouTube mantém o vídeo como rascunho / privado quando a janela é fechada!
+        """
+        logger.info("Verificando se há diálogo de aviso ('Ainda estamos verificando seu conteúdo')...")
+        start_t = time.time()
+        while time.time() - start_t < timeout_sec:
+            # 1. Tenta locator direto do Playwright
+            for sel in [
+                "text='Publicar mesmo assim'",
+                "text='Publish anyway'",
+                "ytcp-button:has-text('Publicar mesmo assim')",
+                "button:has-text('Publicar mesmo assim')",
+                "#dialog #confirm-button",
+                "ytcp-confirmation-dialog #confirm-button",
+                "#confirm-button",
+            ]:
+                try:
+                    btn = page.locator(sel).first
+                    if btn.count() > 0 and btn.is_visible():
+                        logger.info(f"Botão de confirmação localizado via '{sel}'. Clicando...")
+                        btn.click(force=True, timeout=3000)
+                        time.sleep(3)
+                        return True
+                except Exception:
+                    pass
+
+            # 2. Busca recursiva no DOM e Shadow DOM via JS
+            try:
+                clicked = page.evaluate(
+                    """() => {
+                    function findClickable(root) {
+                        let found = [];
+                        const all = root.querySelectorAll('*');
+                        for (const el of all) {
+                            const tag = el.tagName.toLowerCase();
+                            if (tag === 'button' || tag === 'ytcp-button' || tag === 'tp-yt-paper-button') {
+                                found.push(el);
+                            }
+                            if (el.shadowRoot) {
+                                found = found.concat(findClickable(el.shadowRoot));
+                            }
+                        }
+                        return found;
+                    }
+                    const btns = findClickable(document);
+                    for (const b of btns) {
+                        const text = (b.innerText || b.textContent || '').toLowerCase().trim();
+                        if (text.includes('publicar mesmo assim') || text.includes('publish anyway')) {
+                            b.scrollIntoView({ behavior: 'instant', block: 'center' });
+                            b.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }"""
+                )
+                if clicked:
+                    logger.info("Botão 'Publicar mesmo assim' acionado via JS no DOM!")
+                    time.sleep(3)
+                    return True
+            except Exception:
+                pass
+            time.sleep(1)
+        return False
+
+    def publish_short(
+        self,
+        video_path: Path,
+        title: str,
+        description: str,
+        tags: List[str],
+        clip_uid: str,
+        category_name: Optional[str] = "Entretenimento",
+        language: str = "Português (Brasil)",
+        is_synthetic_ai: bool = True,
+        publish_mode: Literal["PUBLIC", "SCHEDULE", "UNLISTED", "PRIVATE"] = "PUBLIC",
+        schedule_datetime: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """
+        Método de compatibilidade com a interface clássica do publicador.
+        Encapsula os parâmetros em PublishPayloadPro e executa publish_short_pro.
+        """
+        payload = PublishPayloadPro(
+            video_path=video_path,
+            title=title,
+            description=description,
+            tags=tags or [],
+            category_name=category_name,
+            language=language,
+            is_synthetic_ai=is_synthetic_ai,
+            publish_mode=publish_mode,
+            schedule_datetime=schedule_datetime,
+            clip_uid=clip_uid,
+        )
+        return self.publish_short_pro(payload)
 
     def publish_short_pro(self, payload: PublishPayloadPro) -> Dict[str, Any]:
         """
@@ -504,8 +796,8 @@ class YouTubeBrowserPublisherPro:
 
         if not self.is_authenticated():
             err_msg = (
-                f"Sessão do YouTube não encontrada! Execute primeiro 'python scripts/youtube_login.py' "
-                f"ou o arquivo BAT de login do canal."
+                "Sessão do YouTube não encontrada! Execute primeiro 'python scripts/youtube_login.py' "
+                "ou o arquivo BAT de login do canal."
             )
             logger.error(err_msg, extra={"event": "youtube_pro_no_auth", "clip_uid": payload.clip_uid})
             raise YouTubePublishError(err_msg)
@@ -518,7 +810,7 @@ class YouTubeBrowserPublisherPro:
 
         # Formata tags para descrição e hashtags
         formatted_tags = []
-        for t in (payload.tags or []):
+        for t in payload.tags or []:
             clean_t = t.strip().lstrip("#")
             if clean_t:
                 formatted_tags.append(f"#{clean_t}")
@@ -534,33 +826,37 @@ class YouTubeBrowserPublisherPro:
             "youtube_publisher_pro",
             f"Publicar Short PRO ({payload.clip_uid[:8]})",
             total_steps=7,
-            message=f"Iniciando publicação PRO para '{final_title[:40]}'"
+            message=f"Iniciando publicação PRO para '{final_title[:40]}'",
         )
 
         with sync_playwright() as p:
             context_args = {
                 "headless": self.headless,
-                "args": ["--start-maximized", "--disable-blink-features=AutomationControlled"],
+                "args": [
+                    "--start-maximized",
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-infobars",
+                    "--disable-dev-shm-usage",
+                    "--window-size=1920,1080",
+                ],
                 "no_viewport": True,
+                "viewport": {"width": 1920, "height": 1080},
                 "user_agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                )
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+                ),
+                "ignore_default_args": ["--enable-automation"],
             }
 
             browser = None
             if self.profile_dir.exists():
                 try:
                     context = p.chromium.launch_persistent_context(
-                        user_data_dir=str(self.profile_dir),
-                        channel="chrome",
-                        **context_args
+                        user_data_dir=str(self.profile_dir), channel="chrome", **context_args
                     )
                 except Exception:
-                    context = p.chromium.launch_persistent_context(
-                        user_data_dir=str(self.profile_dir),
-                        **context_args
-                    )
+                    context = p.chromium.launch_persistent_context(user_data_dir=str(self.profile_dir), **context_args)
                 if self.state_file.exists():
                     try:
                         state_data = json.loads(self.state_file.read_text(encoding="utf-8"))
@@ -571,17 +867,23 @@ class YouTubeBrowserPublisherPro:
                         logger.debug(f"Aviso ao injetar cookies no perfil: {c_err}")
                 page = context.pages[0] if context.pages else context.new_page()
             else:
-                browser = p.chromium.launch(headless=self.headless, args=["--start-maximized"])
+                browser = p.chromium.launch(
+                    headless=self.headless,
+                    args=context_args["args"],
+                    ignore_default_args=context_args["ignore_default_args"],
+                )
                 context = browser.new_context(
                     storage_state=str(self.state_file) if self.state_file.exists() else None,
                     no_viewport=True,
-                    user_agent=context_args["user_agent"]
                 )
                 page = context.new_page()
 
             captured_network_video_ids: List[str] = []
+            upload_started = [False]
 
             def _on_network_response(resp):
+                if not upload_started[0]:
+                    return
                 try:
                     u = resp.url
                     m_u = re.search(r"[?&]video[_-]?id=([a-zA-Z0-9_-]{11})", u, re.IGNORECASE)
@@ -593,7 +895,9 @@ class YouTubeBrowserPublisherPro:
                         c_type = resp.headers.get("content-type", "")
                         if "json" in c_type or "text" in c_type:
                             body = resp.text()
-                            for m in re.findall(r'"(?:videoId|encryptedVideoId|externalId)":\s*"([a-zA-Z0-9_-]{11})"', body):
+                            for m in re.findall(
+                                r'"(?:videoId|encryptedVideoId|externalId)":\s*"([a-zA-Z0-9_-]{11})"', body
+                            ):
                                 if m not in captured_network_video_ids:
                                     captured_network_video_ids.append(m)
                 except Exception:
@@ -602,11 +906,15 @@ class YouTubeBrowserPublisherPro:
             page.on("response", _on_network_response)
 
             try:
-                page.set_default_timeout(60000)
+                page.set_default_timeout(360000)  # 6 minutos de tolerância geral para upload e verificações
 
                 # 1. Navegação até o YouTube Studio
                 SignalTracker.emit_progress("youtube_publisher_pro", 1, 7, "Acessando YouTube Studio...")
-                target_url = f"https://studio.youtube.com/channel/{self.channel_id}" if self.channel_id else "https://studio.youtube.com"
+                target_url = (
+                    f"https://studio.youtube.com/channel/{self.channel_id}"
+                    if self.channel_id
+                    else "https://studio.youtube.com"
+                )
                 page.goto(target_url, wait_until="domcontentloaded")
 
                 if "accounts.google.com" in page.url or "signin" in page.url:
@@ -630,15 +938,21 @@ class YouTubeBrowserPublisherPro:
                         self._safe_click(direct_up)
 
                 # 3. Enviar arquivo de vídeo
-                SignalTracker.emit_progress("youtube_publisher_pro", 2, 7, f"Enviando arquivo {payload.video_path.name}...")
+                SignalTracker.emit_progress(
+                    "youtube_publisher_pro", 2, 7, f"Enviando arquivo {payload.video_path.name}..."
+                )
                 file_input = page.locator('input[type="file"]')
                 file_input.wait_for(state="attached", timeout=30000)
                 file_input.first.set_input_files(str(payload.video_path.resolve()))
+                upload_started[0] = True
+                captured_network_video_ids.clear()
                 time.sleep(5)
 
                 # Checagem de limite diário
                 content_text = page.content().lower()
-                if any(phrase in content_text for phrase in ["limite diário", "daily upload limit", "atingiu seu limite"]):
+                if any(
+                    phrase in content_text for phrase in ["limite diário", "daily upload limit", "atingiu seu limite"]
+                ):
                     page.screenshot(path=str(screenshot_dir / f"yt_quota_limit_{payload.clip_uid}.png"))
                     raise QuotaExceededError("Limite diário de envios alcançado no YouTube Studio para este canal.")
 
@@ -666,32 +980,42 @@ class YouTubeBrowserPublisherPro:
                         pass
                     time.sleep(1)
 
-                # Marca 'Não é conteúdo para crianças'
-                page.evaluate("""() => {
-                    const el = document.querySelector('tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_NOT_MFK"]') 
-                            || document.querySelector('#not-made-for-kids');
-                    if (el) {
-                        el.scrollIntoView({ behavior: 'instant', block: 'center' });
-                        el.click();
-                    }
-                }""")
+                # Marca 'Não é conteúdo para crianças' com validação rigorosa de Shadow DOM
+                self._set_coppa_audience(page, is_made_for_kids=False)
 
                 # 5. Expansão PRO: Mostrar Mais, Tags Oficiais, IA, Categoria, Idioma
-                SignalTracker.emit_progress("youtube_publisher_pro", 4, 7, "Configurando opções avançadas (Tags SEO, IA, Categoria)...")
-                self._expand_show_more(page)
-                time.sleep(1)
+                SignalTracker.emit_progress(
+                    "youtube_publisher_pro", 4, 7, "Configurando opções avançadas (Tags SEO, IA, Categoria)..."
+                )
+                try:
+                    self._expand_show_more(page)
+                    time.sleep(1)
+                except Exception as e:
+                    logger.debug(f"Aviso no expand_show_more: {e}")
 
                 # Declaração de IA
-                self._set_altered_content_ai(page, payload.is_synthetic_ai)
+                try:
+                    self._set_altered_content_ai(page, payload.is_synthetic_ai)
+                except Exception as e:
+                    logger.debug(f"Aviso no set_altered_content_ai: {e}")
 
                 # Preenchimento de Tags Oficiais
-                self._fill_tags(page, payload.tags)
+                try:
+                    self._fill_tags(page, payload.tags)
+                except Exception as e:
+                    logger.warning(f"Aviso no preenchimento de tags oficiais (não-crítico): {e}")
 
                 # Idioma do Vídeo
-                self._set_language(page, payload.language)
+                try:
+                    self._set_language(page, payload.language)
+                except Exception as e:
+                    logger.debug(f"Aviso no set_language: {e}")
 
                 # Categoria
-                self._set_category(page, payload.category_name)
+                try:
+                    self._set_category(page, payload.category_name)
+                except Exception as e:
+                    logger.debug(f"Aviso no set_category: {e}")
 
                 page.screenshot(path=str(screenshot_dir / f"pro_step1_details_{payload.clip_uid}.png"))
 
@@ -718,16 +1042,20 @@ class YouTubeBrowserPublisherPro:
                 time.sleep(2)
 
                 # 7. Aba Verificações: Monitoramento de Direitos Autorais
-                SignalTracker.emit_progress("youtube_publisher_pro", 6, 7, "Monitorando Verificações de Copyright...")
+                SignalTracker.emit_progress(
+                    "youtube_publisher_pro", 6, 7, "Monitorando Verificações de Copyright (tolerância até 5 min)..."
+                )
                 check_result = {"has_issues": False, "details": "Nenhum problema"}
                 if payload.wait_copyright_checks:
-                    check_result = self._wait_for_copyright_checks(page, max_wait_sec=40)
+                    check_result = self._wait_for_copyright_checks(page, max_wait_sec=300)
                     page.screenshot(path=str(screenshot_dir / f"pro_step3_checks_{payload.clip_uid}.png"))
 
                 effective_mode = payload.publish_mode
                 if check_result.get("has_issues"):
                     if payload.on_copyright_issue == "ABORT":
-                        raise YouTubePublishError(f"Abortado devido a restrição de copyright: {check_result.get('details')}")
+                        raise YouTubePublishError(
+                            f"Abortado devido a restrição de copyright: {check_result.get('details')}"
+                        )
                     else:
                         logger.warning("Alterando modo para UNLISTED para proteção contra strike/reivindicação.")
                         effective_mode = "UNLISTED"
@@ -736,21 +1064,26 @@ class YouTubeBrowserPublisherPro:
                 self._advance_to_visibility_tab(page)
 
                 # 8. Aba Visibilidade: Público ou Agendamento
-                SignalTracker.emit_progress("youtube_publisher_pro", 7, 7, f"Aplicando visibilidade ({effective_mode})...")
+                SignalTracker.emit_progress(
+                    "youtube_publisher_pro", 7, 7, f"Aplicando visibilidade ({effective_mode})..."
+                )
                 self._configure_visibility_or_schedule(page, effective_mode, payload.schedule_datetime)
                 page.screenshot(path=str(screenshot_dir / f"pro_step4_visibility_{payload.clip_uid}.png"))
 
                 # Captura de video_id antes de clicar em salvar
                 if not video_id and captured_network_video_ids:
-                    video_id = captured_network_video_ids[0]
+                    video_id = captured_network_video_ids[-1]
 
                 # Clicar em Salvar / Concluir / Programar
                 time.sleep(2)
                 done_btn = page.locator("#done-button, ytcp-button#done-button, button#done-button").first
                 self._safe_click(done_btn, timeout_ms=6000, required=True)
 
-                # Aguarda confirmação modal
-                time.sleep(4)
+                # Tratamento do modal de aviso de verificações em andamento ("Publicar mesmo assim" / "Publish anyway")
+                self._handle_publish_anyway_dialog(page, timeout_sec=10)
+
+                # Aguarda confirmação e processamento final
+                time.sleep(3)
                 if not video_id and captured_network_video_ids:
                     video_id = captured_network_video_ids[-1]
 
@@ -759,6 +1092,14 @@ class YouTubeBrowserPublisherPro:
                     modal_link = page.locator("a.ytcp-video-info, a[href*='youtu.be']").first
                     if modal_link.count() > 0:
                         video_id = self._extract_video_id(modal_link.get_attribute("href") or "")
+
+                # Fecha diálogo de compartilhamento pós-upload se presente (#close-button)
+                try:
+                    close_btn = page.locator("#close-button, ytcp-button#close-button, button#close-button").first
+                    if close_btn.count() > 0 and close_btn.is_visible():
+                        self._safe_click(close_btn, timeout_ms=3000)
+                except Exception:
+                    pass
 
                 final_status = "SCHEDULED" if effective_mode == "SCHEDULE" else "POSTED"
 
@@ -775,10 +1116,12 @@ class YouTubeBrowserPublisherPro:
                     "mode": effective_mode,
                     "checks": check_result,
                     "title": final_title,
-                    "clip_uid": payload.clip_uid
+                    "clip_uid": payload.clip_uid,
                 }
 
-                SignalTracker.emit_finish("youtube_publisher_pro", f"Short PRO concluído com sucesso ({final_status})!", success=True)
+                SignalTracker.emit_finish(
+                    "youtube_publisher_pro", f"Short PRO concluído com sucesso ({final_status})!", success=True
+                )
                 return result_data
 
             finally:

@@ -3,12 +3,9 @@ Módulo de Controle Central de Execução, Pausa e Gestão de Memória da Pipeli
 Permite pausar/retomar robôs individualmente ou em conjunto via SQLite WAL mode,
 e fornece o Escudo de Memória RAM (RAM Conflict Shield) entre Supoclip e LLM Copywriter.
 """
-import json
-import sqlite3
-import time
+
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
 try:
     import psutil
@@ -45,11 +42,19 @@ SERVICE_LABELS = {
     "llm_copywriter": "Copywriter LLM",
 }
 
-def init_controls_table():
-    """Garante que a tabela de controles de execução existe no banco."""
+_initialized_dbs = set()
+
+
+def init_controls_table(force: bool = False):
+    """Garante que a tabela de controles de execução existe no banco uma única vez por base de dados."""
+    db_path = str(settings.DB_PATH)
+    if not force and db_path in _initialized_dbs:
+        return
+
     try:
         with get_db() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS pipeline_controls (
                     service_name TEXT PRIMARY KEY,
                     is_paused INTEGER DEFAULT 0,
@@ -57,15 +62,20 @@ def init_controls_table():
                     pause_reason TEXT,
                     updated_at TEXT
                 );
-            """)
+            """
+            )
             now_iso = datetime.now(timezone.utc).isoformat()
-            for s in SERVICES:
-                conn.execute("""
-                    INSERT OR IGNORE INTO pipeline_controls (service_name, is_paused, updated_at)
-                    VALUES (?, 0, ?);
-                """, (s, now_iso))
+            conn.executemany(
+                """
+                INSERT OR IGNORE INTO pipeline_controls (service_name, is_paused, updated_at)
+                VALUES (?, 0, ?);
+            """,
+                [(s, now_iso) for s in SERVICES],
+            )
+        _initialized_dbs.add(db_path)
     except Exception as e:
         logger.debug(f"Aviso ao inicializar pipeline_controls: {e}")
+
 
 class PipelineController:
     """Gerenciador central de pausa, retomada e proteção de recursos."""
@@ -79,11 +89,14 @@ class PipelineController:
         try:
             with get_db() as conn:
                 cur = conn.cursor()
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT service_name, is_paused
                     FROM pipeline_controls
                     WHERE service_name IN (?, 'all');
-                """, (service_name,))
+                """,
+                    (service_name,),
+                )
                 rows = {r["service_name"]: bool(r["is_paused"]) for r in cur.fetchall()}
                 return rows.get("all", False) or rows.get(service_name, False)
         except Exception as e:
@@ -103,7 +116,8 @@ class PipelineController:
         try:
             with get_db() as conn:
                 cur = conn.cursor()
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO pipeline_controls (service_name, is_paused, paused_at, pause_reason, updated_at)
                     VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(service_name) DO UPDATE SET
@@ -111,7 +125,15 @@ class PipelineController:
                         paused_at = CASE WHEN excluded.is_paused = 1 THEN excluded.paused_at ELSE NULL END,
                         pause_reason = CASE WHEN excluded.is_paused = 1 THEN excluded.pause_reason ELSE NULL END,
                         updated_at = excluded.updated_at;
-                """, (service_name, 1 if paused else 0, now_iso if paused else None, reason if paused else None, now_iso))
+                """,
+                    (
+                        service_name,
+                        1 if paused else 0,
+                        now_iso if paused else None,
+                        reason if paused else None,
+                        now_iso,
+                    ),
+                )
 
             action = "PAUSADO" if paused else "RETOMADO"
             label = SERVICE_LABELS.get(service_name, service_name)
@@ -150,10 +172,13 @@ class PipelineController:
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
             with get_db() as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE pipeline_controls
                     SET is_paused = 0, paused_at = NULL, pause_reason = NULL, updated_at = ?;
-                """, (now_iso,))
+                """,
+                    (now_iso,),
+                )
             logger.info("[CONTROLE] Todos os robôs da pipeline foram RETOMADOS com sucesso.")
             return True
         except Exception as e:
@@ -202,11 +227,13 @@ class PipelineController:
         try:
             with get_db() as conn:
                 cur = conn.cursor()
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT COUNT(*) as active_count
                     FROM supoclip_jobs
                     WHERE status IN ('SUBMITTED', 'PROCESSING');
-                """)
+                """
+                )
                 row = cur.fetchone()
                 return (row["active_count"] if row else 0) > 0
         except Exception as e:
@@ -220,14 +247,17 @@ class PipelineController:
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
             with get_db() as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO pipeline_controls (service_name, is_paused, updated_at, pause_reason)
                     VALUES ('copywriter_running', ?, ?, ?)
                     ON CONFLICT(service_name) DO UPDATE SET
                         is_paused = excluded.is_paused,
                         updated_at = excluded.updated_at,
                         pause_reason = excluded.pause_reason;
-                """, (1 if active else 0, now_iso, "LLM copywriter active" if active else "idle"))
+                """,
+                    (1 if active else 0, now_iso, "LLM copywriter active" if active else "idle"),
+                )
         except Exception as e:
             logger.debug(f"Aviso ao atualizar copywriter_running: {e}")
 
@@ -237,7 +267,9 @@ class PipelineController:
         try:
             with get_db() as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT is_paused, updated_at FROM pipeline_controls WHERE service_name = 'copywriter_running';")
+                cur.execute(
+                    "SELECT is_paused, updated_at FROM pipeline_controls WHERE service_name = 'copywriter_running';"
+                )
                 row = cur.fetchone()
                 if not row or not row["is_paused"]:
                     return False
@@ -280,7 +312,10 @@ class PipelineController:
 
         mem = cls.get_system_memory_info()
         if mem.get("available") and mem.get("free_gb", 1.0) < 0.35:
-            return False, f"⚠️ Memória RAM crítica (< 350 MB livres: {mem.get('free_gb')} GB). Postergando envio para evitar travamento do SO."
+            return (
+                False,
+                f"⚠️ Memória RAM crítica (< 350 MB livres: {mem.get('free_gb')} GB). Postergando envio para evitar travamento do SO.",
+            )
 
         return True, "Pronto para ingestão"
 
@@ -298,11 +333,14 @@ class PipelineController:
 
         # Só suspende se a LLM for local
         if cls.is_local_llm() and cls.is_clip_processing_active():
-            return False, "🛡️ Canal Crítico (RAM Shield): Supoclip fatiando vídeo. Suspendendo LLM local para evitar sobrecarga simultânea."
+            return (
+                False,
+                "🛡️ Canal Crítico (RAM Shield): Supoclip fatiando vídeo. Suspendendo LLM local para evitar sobrecarga simultânea.",
+            )
 
         mem = cls.get_system_memory_info()
         if mem.get("available") and mem.get("free_gb", 1.0) < 0.35:
-            return False, f"⚠️ Memória RAM crítica (< 350 MB livres). Postergando chamada da LLM."
+            return False, "⚠️ Memória RAM crítica (< 350 MB livres). Postergando chamada da LLM."
 
         return True, "Pronto para copywriting"
 
@@ -310,32 +348,20 @@ class PipelineController:
     def get_system_memory_info(cls) -> Dict[str, Any]:
         """Obtém métricas em tempo real de uso da memória RAM física."""
         if psutil is None:
-            return {
-                "percent": 0.0,
-                "used_gb": 0.0,
-                "total_gb": 0.0,
-                "free_gb": 0.0,
-                "available": False
-            }
+            return {"percent": 0.0, "used_gb": 0.0, "total_gb": 0.0, "free_gb": 0.0, "available": False}
         try:
             mem = psutil.virtual_memory()
-            total_gb = round(mem.total / (1024 ** 3), 1)
-            used_gb = round(mem.used / (1024 ** 3), 1)
-            free_gb = round(mem.available / (1024 ** 3), 1)
+            total_gb = round(mem.total / (1024**3), 1)
+            used_gb = round(mem.used / (1024**3), 1)
+            free_gb = round(mem.available / (1024**3), 1)
             return {
                 "percent": round(mem.percent, 1),
                 "used_gb": used_gb,
                 "total_gb": total_gb,
                 "free_gb": free_gb,
                 "available": True,
-                "is_high_pressure": mem.percent >= 80.0
+                "is_high_pressure": mem.percent >= 80.0,
             }
         except Exception as e:
             logger.debug(f"Erro ao coletar memória via psutil: {e}")
-            return {
-                "percent": 0.0,
-                "used_gb": 0.0,
-                "total_gb": 0.0,
-                "free_gb": 0.0,
-                "available": False
-            }
+            return {"percent": 0.0, "used_gb": 0.0, "total_gb": 0.0, "free_gb": 0.0, "available": False}

@@ -80,3 +80,51 @@ def test_same_video_slot_spacing(temp_dir, monkeypatch):
 
         # O slot para o mesmo vídeo deve ser de pelo menos 120 minutos após base_sched
         assert slot_same_video >= base_sched + timedelta(minutes=119)
+
+
+def test_schedule_pending_clips_discards_overlapping_without_check_violation(temp_dir, monkeypatch):
+    """Testa se schedule_pending_clips descarta cortes sobrepostos com status SKIPPED sem violar CHECK constraint."""
+    db_file = temp_dir / "check_constraint_test.db"
+    from src.database.migrations import run_migrations
+    run_migrations(db_file)
+
+    import src.core.config as cfg
+    monkeypatch.setattr(cfg.settings, "DB_PATH", db_file)
+
+    with get_db(db_file) as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO long_videos (file_hash, file_name, file_path, status) VALUES ('h_chk', 'v.mp4', 'p.mp4', 'COMPLETED');")
+        vid_id = cursor.lastrowid
+
+        # Insere clip_hist já agendado
+        cursor.execute("""
+            INSERT INTO clips (
+                long_video_id, clip_uid, file_path, virality_score,
+                start_seconds, end_seconds, duration_seconds,
+                title, moderation_status, youtube_status, tiktok_status
+            ) VALUES (?, 'clip_hist', 'c1.mp4', 95, 10.0, 40.0, 30.0,
+                     '🔥 Corte 1', 'APPROVED', 'SCHEDULED', 'SCHEDULED');
+        """, (vid_id,))
+
+        # Insere clip_cand pendente com sobreposição temporal
+        cursor.execute("""
+            INSERT INTO clips (
+                long_video_id, clip_uid, file_path, virality_score,
+                start_seconds, end_seconds, duration_seconds,
+                title, moderation_status, youtube_status, tiktok_status
+            ) VALUES (?, 'clip_cand', 'c2.mp4', 80, 10.0, 40.0, 30.0,
+                     '🔥 Corte 2', 'APPROVED', 'PENDING', 'PENDING');
+        """, (vid_id,))
+
+    # Executa o agendamento
+    schedule_pending_clips()
+
+    with get_db(db_file) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT youtube_status, tiktok_status, error_log FROM clips WHERE clip_uid = 'clip_cand';")
+        cand = cursor.fetchone()
+        assert cand["youtube_status"] == "SKIPPED"
+        assert cand["tiktok_status"] == "SKIPPED"
+        assert "Sobreposição" in cand["error_log"]
+
+

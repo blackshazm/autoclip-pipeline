@@ -13,20 +13,22 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='repla
 
 ROOT = Path(__file__).resolve().parent.parent
 
+import json
+
 ACCOUNTS = [
     {
         "name": "YouTube Shorts (Finanças / Raiz do Éden)",
         "platform": "youtube",
         "profile": ROOT / "data" / "youtube_browser_profile_financas",
         "state": ROOT / "config" / "youtube_financas_state.json",
-        "url": "https://studio.youtube.com",
+        "url": "https://studio.youtube.com/channel/UC3cuNGcJ39dJ1IbEmIxllfQ/videos/short",
     },
     {
-        "name": "YouTube Shorts (Fitness)",
+        "name": "YouTube Shorts (Fitness / weslleykebra)",
         "platform": "youtube",
         "profile": ROOT / "data" / "youtube_browser_profile_fitness",
         "state": ROOT / "config" / "youtube_fitness_state.json",
-        "url": "https://studio.youtube.com",
+        "url": "https://studio.youtube.com/channel/UCV2JvGLYdsf6s6dDkxIDtWg/videos/short",
     },
     {
         "name": "TikTok (Finanças)",
@@ -54,30 +56,62 @@ def check_account_health(p, acc):
     if not profile.exists() and not state.exists():
         return False, "Arquivos de sessão ausentes (nunca logado)"
 
-    args = ["--start-maximized", "--disable-blink-features=AutomationControlled"]
-    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    args = [
+        "--start-maximized",
+        "--disable-blink-features=AutomationControlled",
+        "--window-size=1920,1080",
+    ]
+    user_agent = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+    )
 
     browser = None
     context = None
     try:
         if platform == "tiktok" and state.exists():
             browser = p.chromium.launch(headless=True, args=args)
-            context = browser.new_context(storage_state=str(state), user_agent=user_agent)
+            context = browser.new_context(
+                storage_state=str(state),
+                user_agent=user_agent,
+                viewport={"width": 1920, "height": 1080},
+            )
             page = context.new_page()
         elif profile.exists():
+            ctx_kwargs = {
+                "user_data_dir": str(profile),
+                "headless": True,
+                "args": args,
+                "user_agent": user_agent,
+                "viewport": {"width": 1920, "height": 1080},
+            }
             try:
-                context = p.chromium.launch_persistent_context(user_data_dir=str(profile), channel="chrome", headless=True, args=args, user_agent=user_agent)
+                context = p.chromium.launch_persistent_context(channel="chrome", **ctx_kwargs)
             except Exception:
-                context = p.chromium.launch_persistent_context(user_data_dir=str(profile), headless=True, args=args, user_agent=user_agent)
+                context = p.chromium.launch_persistent_context(**ctx_kwargs)
+
+            if state.exists():
+                try:
+                    data = json.loads(state.read_text(encoding="utf-8"))
+                    cookies = data.get("cookies", [])
+                    if cookies:
+                        context.add_cookies(cookies)
+                except Exception:
+                    pass
+
             page = context.pages[0] if context.pages else context.new_page()
         else:
             browser = p.chromium.launch(headless=True, args=args)
-            context = browser.new_context(storage_state=str(state) if state.exists() else None, user_agent=user_agent)
+            context = browser.new_context(
+                storage_state=str(state) if state.exists() else None,
+                user_agent=user_agent,
+                viewport={"width": 1920, "height": 1080},
+            )
             page = context.new_page()
 
-        page.set_default_timeout(20000)
+        page.set_default_timeout(25000)
         page.goto(url, wait_until="domcontentloaded")
-        time.sleep(3)
+        time.sleep(4)
         cur_url = page.url.lower()
 
         if platform == "youtube":

@@ -3,13 +3,14 @@ Script de Limpeza Cirúrgica de Nichos:
 Cancela clipes de entretenimento (Flow, Podpah, Groselha) da fila de agendamento,
 libera espaço em disco e reorganiza o agendamento dos clipes dos nichos oficiais (Finanças e Fitness).
 """
+
 import sys
 import sqlite3
 from pathlib import Path
 from datetime import datetime, timedelta
 import zoneinfo
 
-sys.stdout.reconfigure(encoding='utf-8')
+sys.stdout.reconfigure(encoding="utf-8")
 
 db_path = Path("data/pipeline.db")
 conn = sqlite3.connect(db_path)
@@ -46,13 +47,16 @@ for row in clips_to_clean:
             print(f"  [AVISO] Não foi possível apagar {p}: {e}")
 
     # Atualiza status no banco
-    c.execute("""
+    c.execute(
+        """
         UPDATE clips
         SET youtube_status = 'SKIPPED',
             error_log = 'CLEANUP_NICHE_FILTER: Ignorado para manter canal focado apenas em Finanças e Fitness',
             is_deleted_from_disk = 1
         WHERE id = ?
-    """, (clip_id,))
+    """,
+        (clip_id,),
+    )
     cleaned_ids.append(clip_id)
 
 conn.commit()
@@ -87,7 +91,7 @@ schedule_time = None
 curr_date = now.date()
 
 slots = []
-for day_offset in range(15): # planeja próximos dias
+for day_offset in range(15):  # planeja próximos dias
     target_date = curr_date + timedelta(days=day_offset)
     for h, m in POSTING_WINDOWS:
         slot_dt = datetime(target_date.year, target_date.month, target_date.day, h, m, tzinfo=tz_sp)
@@ -102,12 +106,17 @@ for day_offset in range(15): # planeja próximos dias
 for i, clip_row in enumerate(remaining_clips):
     target_slot = slots[i]
     target_utc_iso = target_slot.astimezone(zoneinfo.ZoneInfo("UTC")).isoformat()
-    c.execute("""
+    c.execute(
+        """
         UPDATE clips
         SET scheduled_for = ?
         WHERE id = ?
-    """, (target_utc_iso, clip_row[0]))
-    print(f"  Clip ID {clip_row[0]} [{clip_row[3]} - {clip_row[2]}] reagendado para: {target_slot.strftime('%d/%m/%Y %H:%M')}")
+    """,
+        (target_utc_iso, clip_row[0]),
+    )
+    print(
+        f"  Clip ID {clip_row[0]} [{clip_row[3]} - {clip_row[2]}] reagendado para: {target_slot.strftime('%d/%m/%Y %H:%M')}"
+    )
 
 conn.commit()
 

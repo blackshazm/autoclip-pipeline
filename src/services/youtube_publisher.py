@@ -1,12 +1,9 @@
 """
 Publicador do YouTube Shorts via YouTube Data API v3 com OAuth2 Resiliente.
 """
+
 from pathlib import Path
 from typing import Dict, Any, Optional
-import os
-import json
-from datetime import datetime, timezone
-import google.auth
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
@@ -18,6 +15,7 @@ from src.core.logger import get_logger
 from src.core.exceptions import YouTubePublishError, QuotaExceededError
 
 logger = get_logger("youtube_publisher")
+
 
 class YouTubePublisher:
     SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
@@ -42,12 +40,7 @@ class YouTubePublisher:
             return None
 
     def publish_short(
-        self,
-        video_path: Path,
-        title: str,
-        description: str,
-        tags: list,
-        clip_uid: str
+        self, video_path: Path, title: str, description: str, tags: list, clip_uid: str
     ) -> Dict[str, Any]:
         """
         Publica o corte vertical como Shorts no YouTube com tag #Shorts e referência de idempotência.
@@ -60,13 +53,9 @@ class YouTubePublisher:
         if not service:
             logger.warning(
                 f"[SIMULAÇÃO] Credenciais do YouTube não configuradas. Simulando envio para {clip_uid}.",
-                extra={"event": "youtube_mock_publish", "clip_uid": clip_uid}
+                extra={"event": "youtube_mock_publish", "clip_uid": clip_uid},
             )
-            return {
-                "youtube_video_id": f"mock_yt_{clip_uid[:11]}",
-                "status": "POSTED",
-                "simulated": True
-            }
+            return {"youtube_video_id": f"mock_yt_{clip_uid[:11]}", "status": "POSTED", "simulated": True}
 
         # Garante a tag #Shorts no título ou descrição
         final_title = title.strip()
@@ -83,22 +72,15 @@ class YouTubePublisher:
                 "title": final_title[:100],
                 "description": final_desc,
                 "tags": tags,
-                "categoryId": "24"  # Entretenimento
+                "categoryId": "24",  # Entretenimento
             },
-            "status": {
-                "privacyStatus": "public",
-                "selfDeclaredMadeForKids": False
-            }
+            "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False},
         }
 
         media = MediaFileUpload(str(video_path), mimetype="video/mp4", resumable=True)
 
         try:
-            request = service.videos().insert(
-                part="snippet,status",
-                body=body,
-                media_body=media
-            )
+            request = service.videos().insert(part="snippet,status", body=body, media_body=media)
             response = None
             while response is None:
                 status, response = request.next_chunk()
@@ -108,13 +90,9 @@ class YouTubePublisher:
             video_id = response.get("id")
             logger.info(
                 f"Vídeo publicado com sucesso no YouTube Shorts: https://youtube.com/shorts/{video_id}",
-                extra={"event": "youtube_publish_success", "video_id": video_id, "clip_uid": clip_uid}
+                extra={"event": "youtube_publish_success", "video_id": video_id, "clip_uid": clip_uid},
             )
-            return {
-                "youtube_video_id": video_id,
-                "status": "POSTED",
-                "response": response
-            }
+            return {"youtube_video_id": video_id, "status": "POSTED", "response": response}
 
         except HttpError as e:
             if e.resp.status == 403 and "quotaExceeded" in str(e):

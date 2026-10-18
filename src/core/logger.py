@@ -1,12 +1,12 @@
 """
 Logging Estruturado em Formato JSON para Operação Lights-Out.
 """
+
 import json
 import logging
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 import re
 
 from src.core.config import settings
@@ -16,14 +16,16 @@ SECRET_PATTERNS = [
     re.compile(r"(sk-[a-zA-Z0-9_\-]{20,})"),
     re.compile(r"(AIza[0-9A-Za-z-_]{35})"),
     re.compile(r"(ya29\.[0-9A-Za-z-_]+)"),
-    re.compile(r"(act\.[0-9A-Za-z-_]+)")
+    re.compile(r"(act\.[0-9A-Za-z-_]+)"),
 ]
+
 
 def mask_secrets(text: str) -> str:
     """Mascara chaves e tokens conhecidos em strings de log."""
     for pattern in SECRET_PATTERNS:
         text = pattern.sub(r"\1"[:6] + "..." + r"\1"[-4:], text)
     return text
+
 
 class JsonFormatter(logging.Formatter):
     """Formatador que emite eventos em JSON com schema estrito."""
@@ -38,7 +40,7 @@ class JsonFormatter(logging.Formatter):
             "level": record.levelname,
             "service": getattr(record, "service", self.service_name),
             "event": getattr(record, "event", "generic_log"),
-            "message": mask_secrets(record.getMessage())
+            "message": mask_secrets(record.getMessage()),
         }
 
         # Campos contextuais opcionais
@@ -51,10 +53,11 @@ class JsonFormatter(logging.Formatter):
 
         return json.dumps(log_data, ensure_ascii=False)
 
+
 def get_logger(service_name: str) -> logging.Logger:
     """Retorna um logger configurado para saída em console e arquivo JSON."""
     logger = logging.getLogger(f"pipeline.{service_name}")
-    
+
     if not logger.handlers:
         level_name = settings.LOG_LEVEL.upper()
         level = getattr(logging, level_name, logging.INFO)

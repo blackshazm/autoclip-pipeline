@@ -8,14 +8,14 @@ Responsabilidade Única:
 
 Este módulo NÃO realiza uploads nem abre navegadores web, eliminando concorrência de CPU com os publicadores.
 """
+
 import argparse
 import gc
 import json
 import time
 import uuid
 from pathlib import Path
-from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import Dict
 
 from src.core.config import settings
 from src.core.logger import get_logger
@@ -23,7 +23,8 @@ from src.core.database import get_db
 from src.services.supoclip_client import SupoclipClient
 from src.services.llm_copywriter import generate_clip_copy
 from src.services.scheduler import schedule_pending_clips
-from src.services.media_validator import inspect_media_file, verify_media_integrity
+from src.services.media_validator import inspect_media_file
+from src.services.notifier import notify_supoclip_job_completed
 from src.services.watchdog import record_heartbeat
 from src.core.process_signals import SignalTracker
 from src.core.pipeline_control import PipelineController
@@ -38,12 +39,14 @@ def sync_supoclip_jobs(client: SupoclipClient) -> int:
 
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT j.id, j.long_video_id, j.supoclip_job_id, v.file_path as original_file_path
+        cursor.execute(
+            """
+            SELECT j.id, j.long_video_id, j.supoclip_job_id, v.file_path as original_file_path, v.file_name, v.youtube_id
             FROM supoclip_jobs j
             JOIN long_videos v ON j.long_video_id = v.id
             WHERE j.status IN ('SUBMITTED', 'PROCESSING');
-        """)
+        """
+        )
         pending_jobs = [dict(r) for r in cursor.fetchall()]
 
     for idx, job in enumerate(pending_jobs, 1):
@@ -61,7 +64,7 @@ def sync_supoclip_jobs(client: SupoclipClient) -> int:
             clips_list = status_data.get("clips", [])
             logger.info(
                 f"Job {supo_id} CONCLUÍDO no Supoclip. {len(clips_list)} clips gerados.",
-                extra={"event": "supoclip_job_completed", "job_id": supo_id, "clips_count": len(clips_list)}
+                extra={"event": "supoclip_job_completed", "job_id": supo_id, "clips_count": len(clips_list)},
             )
 
             from src.services.overlap_filter import filter_overlapping_clips
@@ -69,85 +72,144 @@ def sync_supoclip_jobs(client: SupoclipClient) -> int:
             for c in clips_list:
                 c["long_video_id"] = long_video_id
             kept_clips, discarded_clips = filter_overlapping_clips(clips_list, max_overlap_threshold=0.25)
-            discarded_uids = {d["clip_uid"]: d.get("_overlap_reason", "Sobreposição temporal detectada") for d in discarded_clips}
+            discarded_uids = {
+                d["clip_uid"]: d.get("_overlap_reason", "Sobreposição temporal detectada") for d in discarded_clips
+            }
 
-            with get_db() as conn:
-                cursor = conn.cursor()
-                for c in clips_list:
-                    clip_uid = c["clip_uid"]
-                    virality_score = int(c.get("virality_score", 0))
-                    is_overlap = clip_uid in discarded_uids
-                    is_qualified = (virality_score >= settings.MIN_VIRALITY_SCORE) and not is_overlap
+            prepared_clips = []
+            for c in clips_list:
+                clip_uid = c["clip_uid"]
+                virality_score = int(c.get("virality_score", 0))
+                is_overlap = clip_uid in discarded_uids
+                is_qualified = (virality_score >= settings.MIN_VIRALITY_SCORE) and not is_overlap
 
-                    clip_file = Path(c["file_path"])
-                    clip_duration = float(c.get("duration_seconds") or 0)
+                clip_file = Path(c["file_path"])
+                clip_duration = float(c.get("duration_seconds") or 0)
 
-                    # Smart Reframe (Headroom / Blurred Fit)
-                    if is_qualified and getattr(settings, "ENABLE_SMART_REFRAME", True) and clip_file.exists():
-                        try:
-                            from src.services.smart_reframe import apply_smart_reframe
-                            apply_smart_reframe(clip_file)
-                        except Exception as e_reframe:
-                            logger.warning(f"Smart reframe ignorado para clip {clip_uid}: {e_reframe}")
+                # Smart Reframe (Headroom / Blurred Fit) - fora da transação do banco
+                if is_qualified and getattr(settings, "ENABLE_SMART_REFRAME", True) and clip_file.exists():
+                    try:
+                        from src.services.smart_reframe import apply_smart_reframe
 
-                    # Video Pacing & Retention Loop
-                    if is_qualified and (getattr(settings, "ENABLE_VIDEO_PACING", True) or getattr(settings, "ENABLE_SEAMLESS_LOOP", True)) and clip_file.exists():
-                        try:
-                            from src.services.video_pacing import optimize_clip_pacing
-                            if optimize_clip_pacing(clip_file, speed_factor=getattr(settings, "VIDEO_SPEED_FACTOR", 1.05)):
-                                media_meta = inspect_media_file(clip_file)
-                                clip_duration = round(float(media_meta.get("duration_seconds") or clip_duration), 2)
-                        except Exception as e_pacing:
-                            logger.warning(f"Otimização de retenção/loop ignorada para clip {clip_uid}: {e_pacing}")
+                        apply_smart_reframe(clip_file)
+                    except Exception as e_reframe:
+                        logger.warning(f"Smart reframe ignorado para clip {clip_uid}: {e_reframe}")
 
-                    mod_status = 'APPROVED' if is_qualified else 'MODERATION_BLOCKED'
-                    pub_status = 'PENDING' if is_qualified else 'SKIPPED'
-                    err_msg = discarded_uids.get(clip_uid) if is_overlap else None
+                # Video Pacing & Retention Loop - fora da transação do banco
+                if (
+                    is_qualified
+                    and (
+                        getattr(settings, "ENABLE_VIDEO_PACING", True)
+                        or getattr(settings, "ENABLE_SEAMLESS_LOOP", True)
+                    )
+                    and clip_file.exists()
+                ):
+                    try:
+                        from src.services.video_pacing import optimize_clip_pacing
 
-                    cursor.execute("""
-                        INSERT INTO clips (
-                            long_video_id, clip_uid, file_path, virality_score,
-                            start_seconds, end_seconds, duration_seconds,
-                            width, height, fps, transcription_path,
-                            moderation_status, youtube_status, tiktok_status,
-                            series_id, part_number, total_parts, error_log
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(clip_uid) DO NOTHING;
-                    """, (
-                        long_video_id, clip_uid, str(clip_file), virality_score,
-                        c.get("start_seconds"), c.get("end_seconds"), clip_duration,
-                        c.get("width"), c.get("height"), c.get("fps"), c.get("transcription_path"),
-                        mod_status, pub_status, pub_status,
+                        if optimize_clip_pacing(clip_file, speed_factor=getattr(settings, "VIDEO_SPEED_FACTOR", 1.05)):
+                            media_meta = inspect_media_file(clip_file)
+                            clip_duration = round(float(media_meta.get("duration_seconds") or clip_duration), 2)
+                    except Exception as e_pacing:
+                        logger.warning(f"Otimização de retenção/loop ignorada para clip {clip_uid}: {e_pacing}")
+
+                mod_status = "APPROVED" if is_qualified else "MODERATION_BLOCKED"
+                pub_status = "PENDING" if is_qualified else "SKIPPED"
+                err_msg = discarded_uids.get(clip_uid) if is_overlap else None
+
+                prepared_clips.append(
+                    (
+                        long_video_id,
+                        clip_uid,
+                        str(clip_file),
+                        virality_score,
+                        c.get("start_seconds"),
+                        c.get("end_seconds"),
+                        clip_duration,
+                        c.get("width"),
+                        c.get("height"),
+                        c.get("fps"),
+                        c.get("transcription_path"),
+                        mod_status,
+                        pub_status,
+                        pub_status,
                         c.get("series_id"),
                         c.get("part_number", 1),
                         c.get("total_parts", 1),
-                        err_msg
-                    ))
+                        err_msg,
+                    )
+                )
 
-                cursor.execute("UPDATE supoclip_jobs SET status = 'COMPLETED', completed_at = datetime('now') WHERE id = ?;", (job_db_id,))
-                
-                # Auto-cleanup de vídeo bruto longo
-                is_del = 0
-                if getattr(settings, "AUTO_DELETE_LONG_VIDEOS_ON_COMPLETION", True):
-                    if original_path and original_path.exists():
-                        try:
-                            orig_size = original_path.stat().st_size
-                            original_path.unlink()
-                            is_del = 1
-                            logger.info(f"Auto-cleanup: Vídeo longo purgado ({orig_size / (1024*1024):.2f} MB): {original_path.name}")
-                        except Exception as e:
-                            logger.error(f"Erro ao purgar vídeo longo bruto {original_path}: {e}")
+            # Auto-cleanup de vídeo bruto longo (fora da transação DB)
+            is_del = 0
+            if getattr(settings, "AUTO_DELETE_LONG_VIDEOS_ON_COMPLETION", True):
+                if original_path and original_path.exists():
+                    try:
+                        orig_size = original_path.stat().st_size
+                        original_path.unlink()
+                        is_del = 1
+                        logger.info(
+                            f"Auto-cleanup: Vídeo longo purgado ({orig_size / (1024*1024):.2f} MB): {original_path.name}"
+                        )
+                    except Exception as e:
+                        logger.error(f"Erro ao purgar vídeo longo bruto {original_path}: {e}")
 
-                cursor.execute("UPDATE long_videos SET status = 'COMPLETED', completed_at = datetime('now'), is_deleted_from_disk = ? WHERE id = ?;", (is_del, long_video_id))
+            # Transação atômica ultra-rápida no SQLite
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.executemany(
+                    """
+                    INSERT INTO clips (
+                        long_video_id, clip_uid, file_path, virality_score,
+                        start_seconds, end_seconds, duration_seconds,
+                        width, height, fps, transcription_path,
+                        moderation_status, youtube_status, tiktok_status,
+                        series_id, part_number, total_parts, error_log
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(clip_uid) DO NOTHING;
+                """,
+                    prepared_clips,
+                )
+
+                cursor.execute(
+                    "UPDATE supoclip_jobs SET status = 'COMPLETED', completed_at = datetime('now') WHERE id = ?;",
+                    (job_db_id,),
+                )
+                cursor.execute(
+                    "UPDATE long_videos SET status = 'COMPLETED', completed_at = datetime('now'), is_deleted_from_disk = ? WHERE id = ?;",
+                    (is_del, long_video_id),
+                )
             completed_jobs += 1
+
+            # Dispara notificação comemorativa de cortes prontos
+            try:
+                video_name = job.get("file_name") or original_path.name
+                total_c = len(clips_list)
+                qual_c = len([c for c in prepared_clips if c[11] == "APPROVED"])
+                top_sc = max([c[3] for c in prepared_clips], default=0)
+                notify_supoclip_job_completed(
+                    job_id=supo_id,
+                    video_title=video_name,
+                    total_clips=total_c,
+                    qualified_clips=qual_c,
+                    top_score=top_sc,
+                )
+            except Exception as e_notif:
+                logger.warning(f"Aviso ao enviar notificação de conclusão do Supoclip: {e_notif}")
 
         elif current_status == "FAILED":
             error_msg = status_data.get("error", "Erro não especificado no Supoclip")
             logger.error(f"Job {supo_id} FALHOU no Supoclip: {error_msg}")
             with get_db() as conn:
                 cursor = conn.cursor()
-                cursor.execute("UPDATE supoclip_jobs SET status = 'FAILED', error_message = ? WHERE id = ?;", (error_msg, job_db_id))
-                cursor.execute("UPDATE long_videos SET status = 'FAILED', error_message = ? WHERE id = ?;", (error_msg, long_video_id))
+                cursor.execute(
+                    "UPDATE supoclip_jobs SET status = 'FAILED', error_message = ? WHERE id = ?;",
+                    (error_msg, job_db_id),
+                )
+                cursor.execute(
+                    "UPDATE long_videos SET status = 'FAILED', error_message = ? WHERE id = ?;",
+                    (error_msg, long_video_id),
+                )
 
     return completed_jobs
 
@@ -165,7 +227,8 @@ def enrich_clips_with_copywriting() -> int:
 
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT c.id, c.clip_uid, c.transcription_path, c.virality_score, c.series_id, c.part_number, c.total_parts,
                    COALESCE(sc.niche, 'general') as clip_niche
             FROM clips c
@@ -176,7 +239,9 @@ def enrich_clips_with_copywriting() -> int:
               AND c.title IS NULL
             ORDER BY c.id ASC
             LIMIT ?;
-        """, (settings.MIN_VIRALITY_SCORE, max_copies_per_cycle))
+        """,
+            (settings.MIN_VIRALITY_SCORE, max_copies_per_cycle),
+        )
         clips = [dict(row) for row in cursor.fetchall()]
 
     for idx, clip in enumerate(clips, 1):
@@ -190,49 +255,59 @@ def enrich_clips_with_copywriting() -> int:
         clip_id = clip["id"]
         clip_niche = clip.get("clip_niche") or "general"
         trans_path = Path(clip["transcription_path"]) if clip["transcription_path"] else None
-        
-        transcript_text = ""
-        if trans_path and trans_path.exists():
-            with open(trans_path, "r", encoding="utf-8") as f:
-                transcript_text = f.read()
 
-        if not transcript_text:
-            transcript_text = f"Corte de alta retenção {clip['clip_uid']} com score {clip['virality_score']}."
+        try:
+            transcript_text = ""
+            if trans_path and trans_path.exists():
+                with open(trans_path, "r", encoding="utf-8", errors="replace") as f:
+                    transcript_text = f.read()
 
-        result = generate_clip_copy(
-            clip_id,
-            transcript_text,
-            conn=None,
-            part_number=clip["part_number"] or 1,
-            total_parts=clip["total_parts"] or 1,
-            niche=clip_niche
-        )
-        meta = result["metadata"]
+            if not transcript_text:
+                transcript_text = f"Corte de alta retenção {clip['clip_uid']} com score {clip['virality_score']}."
 
-        with get_db() as update_conn:
-            update_cursor = update_conn.cursor()
-            update_cursor.execute("""
-                UPDATE clips
-                SET title = ?,
-                    description = ?,
-                    tags = ?,
-                    metadata_json = ?,
-                    llm_fallback_used = ?
-                WHERE id = ?;
-            """, (
-                meta["title"],
-                meta["description"],
-                json.dumps(meta["tags"]),
-                json.dumps(meta),
-                1 if result["is_fallback"] else 0,
-                clip_id
-            ))
+            result = generate_clip_copy(
+                clip_id,
+                transcript_text,
+                conn=None,
+                part_number=clip["part_number"] or 1,
+                total_parts=clip["total_parts"] or 1,
+                niche=clip_niche,
+            )
+            meta = result["metadata"]
 
-        enriched_count += 1
-        logger.info(
-            f"Copywriting gerado para clip {clip['clip_uid']}: '{meta['title']}'",
-            extra={"event": "copywriting_done", "clip_id": clip_id, "title": meta["title"]}
-        )
+            with get_db() as update_conn:
+                update_cursor = update_conn.cursor()
+                update_cursor.execute(
+                    """
+                    UPDATE clips
+                    SET title = ?,
+                        description = ?,
+                        tags = ?,
+                        metadata_json = ?,
+                        llm_fallback_used = ?
+                    WHERE id = ?;
+                """,
+                    (
+                        meta["title"],
+                        meta["description"],
+                        json.dumps(meta["tags"]),
+                        json.dumps(meta),
+                        1 if result["is_fallback"] else 0,
+                        clip_id,
+                    ),
+                )
+
+            enriched_count += 1
+            logger.info(
+                f"Copywriting gerado para clip {clip['clip_uid']}: '{meta['title']}'",
+                extra={"event": "copywriting_done", "clip_id": clip_id, "title": meta["title"]},
+            )
+        except Exception as e_clip:
+            logger.error(
+                f"Falha ao gerar copywriting para clip {clip['clip_uid']} (ID {clip_id}): {e_clip}",
+                exc_info=True,
+            )
+            continue
 
         time.sleep(1.0)
         gc.collect()
@@ -254,7 +329,7 @@ def run_media_cycle() -> Dict[str, int]:
         "media_processor",
         "Fábrica de Mídia & Cortes",
         total_steps=3,
-        message=f"Iniciando ciclo de processamento (Worker {WORKER_ID})"
+        message=f"Iniciando ciclo de processamento (Worker {WORKER_ID})",
     )
     client = SupoclipClient()
 
@@ -276,17 +351,9 @@ def run_media_cycle() -> Dict[str, int]:
         "media_processor",
         msg_done,
         success=True,
-        metadata={
-            "jobs_synced": jobs_synced,
-            "copies_generated": copies_generated,
-            "clips_scheduled": clips_scheduled
-        }
+        metadata={"jobs_synced": jobs_synced, "copies_generated": copies_generated, "clips_scheduled": clips_scheduled},
     )
-    return {
-        "jobs_synced": jobs_synced,
-        "copies_generated": copies_generated,
-        "clips_scheduled": clips_scheduled
-    }
+    return {"jobs_synced": jobs_synced, "copies_generated": copies_generated, "clips_scheduled": clips_scheduled}
 
 
 def main():

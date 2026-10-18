@@ -2,10 +2,10 @@
 Utilitário de Autenticação OAuth2 do TikTok.
 Inicia um servidor local simples para receber o callback de autorização e trocar pelo Access Token oficial.
 """
+
 import urllib.parse
 import webbrowser
 import http.server
-import socketserver
 import requests
 import json
 from pathlib import Path
@@ -15,6 +15,7 @@ TOKEN_FILE = CONFIG_DIR / "tiktok_token.json"
 
 PORT = 8088
 REDIRECT_URI = "https://blackshazm.github.io/autoclip-pipeline/callback.html"
+
 
 class TikTokAuthHandler(http.server.SimpleHTTPRequestHandler):
     auth_code = None
@@ -27,10 +28,13 @@ class TikTokAuthHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(b"<h1>Autenticacao TikTok Concluida!</h1><p>Pode fechar esta janela e voltar ao terminal.</p>")
+            self.wfile.write(
+                b"<h1>Autenticacao TikTok Concluida!</h1><p>Pode fechar esta janela e voltar ao terminal.</p>"
+            )
         else:
             self.send_response(404)
             self.end_headers()
+
 
 def authenticate_tiktok(client_key: str, client_secret: str, code: str = None):
     """
@@ -38,7 +42,7 @@ def authenticate_tiktok(client_key: str, client_secret: str, code: str = None):
     """
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     scopes = "user.info.basic,video.upload,video.publish"
-    
+
     auth_url = (
         f"https://www.tiktok.com/v2/auth/authorize/?"
         f"client_key={client_key}&"
@@ -56,7 +60,7 @@ def authenticate_tiktok(client_key: str, client_secret: str, code: str = None):
         print("1. Abra o link acima no seu navegador (caso não abra sozinho).")
         print("2. Faça login e autorize o aplicativo.")
         print("3. Você será redirecionado para a página do GitHub Pages com seu código.")
-        
+
         try:
             webbrowser.open(auth_url)
         except Exception:
@@ -77,7 +81,7 @@ def authenticate_tiktok(client_key: str, client_secret: str, code: str = None):
         "client_secret": client_secret,
         "code": code,
         "grant_type": "authorization_code",
-        "redirect_uri": REDIRECT_URI
+        "redirect_uri": REDIRECT_URI,
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
@@ -99,8 +103,8 @@ def authenticate_tiktok(client_key: str, client_secret: str, code: str = None):
         print(f"\n❌ Erro ao obter token do TikTok ({res.status_code}): {res.text}")
         return None
 
+
 if __name__ == "__main__":
-    import sys
     import argparse
     import os
 
@@ -112,7 +116,7 @@ if __name__ == "__main__":
 
     ck = args.key or input("Digite seu Client Key do TikTok: ").strip()
     cs = args.secret or input("Digite seu Client Secret do TikTok: ").strip()
-    
+
     if ck and cs:
         authenticate_tiktok(ck, cs, code=args.code)
     else:

@@ -5,13 +5,14 @@ Gera 3 formatos lado a lado a partir de um vídeo horizontal de podcast:
 2. Smart Headroom Reframe (Crop com headroom de 20% e respiro vertical)
 3. Blurred Background Fit (Cinema Fit: 100% do vídeo visível no centro + fundo desfocado)
 """
+
 import subprocess
 from pathlib import Path
 
 out_dir = Path("data/testes_enquadramento")
 out_dir.mkdir(parents=True, exist_ok=True)
 
-video_id = "tnNUPyU8JFc" # Lucas Garcia - Monster Cast / 16:9 horizontal
+video_id = "tnNUPyU8JFc"  # Lucas Garcia - Monster Cast / 16:9 horizontal
 raw_sample = out_dir / "raw_podcast_16_9.mp4.webm"
 if not raw_sample.exists():
     raw_sample = out_dir / "raw_podcast_16_9.mp4"
@@ -27,11 +28,23 @@ filter_f1 = (
     "drawtext=text='1. CROP ATUAL (TESTA CORTADA / y=0)':fontcolor=red:fontsize=40:x=(w-text_w)/2:y=120:box=1:boxcolor=black@0.8:boxborderw=10"
 )
 cmd_f1 = [
-    "ffmpeg", "-y", "-i", str(raw_sample),
-    "-vf", filter_f1,
-    "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-    "-c:a", "aac", "-b:a", "128k",
-    str(f1_path)
+    "ffmpeg",
+    "-y",
+    "-i",
+    str(raw_sample),
+    "-vf",
+    filter_f1,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "22",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    str(f1_path),
 ]
 print("Renderizando Formato 1: Crop Atual Sufocado...")
 subprocess.run(cmd_f1, check=True, capture_output=True)
@@ -47,12 +60,27 @@ filter_f2 = (
     "drawtext=text='2. SMART HEADROOM (COM RESPIRO NO TOPO)':fontcolor=yellow:fontsize=36:x=(w-text_w)/2:y=120:box=1:boxcolor=black@0.8:boxborderw=10[v]"
 )
 cmd_f2 = [
-    "ffmpeg", "-y", "-i", str(raw_sample),
-    "-filter_complex", filter_f2,
-    "-map", "[v]", "-map", "0:a?",
-    "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-    "-c:a", "aac", "-b:a", "128k",
-    str(f2_path)
+    "ffmpeg",
+    "-y",
+    "-i",
+    str(raw_sample),
+    "-filter_complex",
+    filter_f2,
+    "-map",
+    "[v]",
+    "-map",
+    "0:a?",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "22",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    str(f2_path),
 ]
 print("Renderizando Formato 2: Smart Headroom...")
 subprocess.run(cmd_f2, check=True, capture_output=True)
@@ -68,34 +96,59 @@ filter_f3 = (
     "drawtext=text='ESPACO LIVRE PARA LEGENDAS GRANDES':fontcolor=white:fontsize=32:x=(w-text_w)/2:y=1500:box=1:boxcolor=black@0.6:boxborderw=8[v]"
 )
 cmd_f3 = [
-    "ffmpeg", "-y", "-i", str(raw_sample),
-    "-filter_complex", filter_f3,
-    "-map", "[v]", "-map", "0:a?",
-    "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-    "-c:a", "aac", "-b:a", "128k",
-    str(f3_path)
+    "ffmpeg",
+    "-y",
+    "-i",
+    str(raw_sample),
+    "-filter_complex",
+    filter_f3,
+    "-map",
+    "[v]",
+    "-map",
+    "0:a?",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "22",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    str(f3_path),
 ]
 print("Renderizando Formato 3: Blurred Background Fit...")
 subprocess.run(cmd_f3, check=True, capture_output=True)
 
 # 5. Gera Snapshot Comparativo Lado a Lado (Grid 3x1 em uma imagem única)
 grid_image = out_dir / "comparativo_3_formatos.jpg"
-filter_grid = (
-    "[0:v]scale=360:640[v0];[1:v]scale=360:640[v1];[2:v]scale=360:640[v2];"
-    "[v0][v1][v2]hstack=inputs=3[v]"
-)
+filter_grid = "[0:v]scale=360:640[v0];[1:v]scale=360:640[v1];[2:v]scale=360:640[v2];" "[v0][v1][v2]hstack=inputs=3[v]"
 cmd_grid = [
-    "ffmpeg", "-y",
-    "-ss", "00:00:03", "-i", str(f1_path),
-    "-ss", "00:00:03", "-i", str(f2_path),
-    "-ss", "00:00:03", "-i", str(f3_path),
-    "-filter_complex", filter_grid,
-    "-map", "[v]",
-    "-vframes", "1",
-    str(grid_image)
+    "ffmpeg",
+    "-y",
+    "-ss",
+    "00:00:03",
+    "-i",
+    str(f1_path),
+    "-ss",
+    "00:00:03",
+    "-i",
+    str(f2_path),
+    "-ss",
+    "00:00:03",
+    "-i",
+    str(f3_path),
+    "-filter_complex",
+    filter_grid,
+    "-map",
+    "[v]",
+    "-vframes",
+    "1",
+    str(grid_image),
 ]
 print("Gerando Snapshot Comparativo Lado a Lado...")
 subprocess.run(cmd_grid, check=True, capture_output=True)
 
-print(f"\nTeste concluído com sucesso!")
+print("\nTeste concluído com sucesso!")
 print(f"Snapshot comparativo gerado em: {grid_image.resolve()}")

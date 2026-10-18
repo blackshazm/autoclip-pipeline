@@ -1,19 +1,22 @@
 """
 Watchdog de Integridade Operacional, Heartbeat e Monitor de DLQ.
 """
+
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 import time
 import sqlite3
 
-from src.core.config import settings
 from src.core.logger import get_logger
 from src.core.database import get_db
 from src.services.notifier import notify_alert
 
 logger = get_logger("watchdog")
 
-def record_heartbeat(service_name: str, status: str = "OK", extra_info: str = "", conn: Optional[sqlite3.Connection] = None) -> None:
+
+def record_heartbeat(
+    service_name: str, status: str = "OK", extra_info: str = "", conn: Optional[sqlite3.Connection] = None
+) -> None:
     """Registra ping periódico de vida do worker na tabela system_heartbeats."""
     sql = """
         INSERT INTO system_heartbeats (service_name, last_ping, status, extra_info)
@@ -32,10 +35,11 @@ def record_heartbeat(service_name: str, status: str = "OK", extra_info: str = ""
     except Exception as e:
         logger.error(f"Erro ao registrar heartbeat para {service_name}: {e}")
 
+
 def check_heartbeats() -> List[Dict[str, Any]]:
-    """Identifica serviços travados ou sem ping há mais de 15 minutos."""
+    """Identifica serviços travados ou sem ping há mais de 25 minutos."""
     stale_services = []
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=25)
 
     with get_db() as conn:
         cursor = conn.cursor()
@@ -47,33 +51,34 @@ def check_heartbeats() -> List[Dict[str, Any]]:
             try:
                 dt = datetime.fromisoformat(last_ping_str).replace(tzinfo=timezone.utc)
                 if dt < cutoff:
-                    stale_services.append({
-                        "service": row["service_name"],
-                        "last_ping": last_ping_str,
-                        "status": row["status"]
-                    })
+                    stale_services.append(
+                        {"service": row["service_name"], "last_ping": last_ping_str, "status": row["status"]}
+                    )
                     notify_alert(
                         "CRITICAL",
                         "watchdog",
                         f"Worker Inativo ({row['service_name']})",
                         f"O serviço {row['service_name']} está sem heartbeat há mais de 15 minutos! Último ping: {last_ping_str}",
-                        conn=conn
+                        conn=conn,
                     )
             except Exception:
                 pass
 
     return stale_services
 
+
 def check_dead_letter_queue() -> int:
     """Verifica e alerta sobre novos itens na fila de falhas fatais (DLQ)."""
     fatal_count = 0
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT id, clip_id, platform, error_code, error_message
             FROM publications
             WHERE status = 'FAILED' AND retry_count >= 3;
-        """)
+        """
+        )
         failed_pubs = cursor.fetchall()
 
         for pub in failed_pubs:
@@ -83,13 +88,15 @@ def check_dead_letter_queue() -> int:
                 "dlq",
                 f"Falha Fatal de Publicação (Clip {pub['clip_id']})",
                 f"Publicação na plataforma {pub['platform']} falhou definitivamente após retries. Erro: {pub['error_message']}",
-                conn=conn
+                conn=conn,
             )
 
     return fatal_count
 
+
 _last_cleanup_timestamp: float = 0.0
 CLEANUP_INTERVAL_SECONDS: int = 900  # 15 minutos (limpeza proativa contínua)
+
 
 def run_watchdog_check():
     """Executa checagem única de saúde e rotina periódica de limpeza de disco."""
@@ -104,11 +111,13 @@ def run_watchdog_check():
     if now - _last_cleanup_timestamp >= CLEANUP_INTERVAL_SECONDS:
         try:
             from src.services.cleanup import run_disk_cleanup
+
             cleanup_res = run_disk_cleanup()
             _last_cleanup_timestamp = now
             logger.info(f"Limpeza de retenção de disco executada com sucesso: {cleanup_res}")
         except Exception as ce:
             logger.error(f"Erro ao executar limpeza de retenção de disco: {ce}", exc_info=True)
+
 
 def run_watchdog_loop(interval_seconds: int = 60):
     """Executa monitoramento contínuo em loop com tolerância a falhas."""
@@ -121,8 +130,10 @@ def run_watchdog_loop(interval_seconds: int = 60):
             record_heartbeat("watchdog", "ERROR", f"Erro: {str(e)[:100]}")
         time.sleep(interval_seconds)
 
+
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Watchdog Guardião de Integridade Operacional")
     parser.add_argument("--once", action="store_true", help="Executa checagem única e encerra")
     parser.add_argument("--interval", type=int, default=60, help="Intervalo em segundos entre checagens (padrão: 60s)")

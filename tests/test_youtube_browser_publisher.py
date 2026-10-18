@@ -46,3 +46,23 @@ def test_publish_short_not_authenticated(tmp_path):
     pub = YouTubeBrowserPublisher(profile_dir=empty_profile, state_file=empty_state)
     with pytest.raises(YouTubePublishError, match="Sessão do YouTube não encontrada"):
         pub.publish_short(fake_video, "Titulo", "Desc", ["tag"], "clip_1")
+
+
+def test_standard_set_coppa_audience():
+    """Valida que o método _set_coppa_audience confirma com sucesso na versão padrão do publisher."""
+    publisher = YouTubeBrowserPublisher()
+    mock_page = MagicMock()
+    mock_locator = MagicMock()
+    mock_locator.count.return_value = 1
+    mock_page.locator.return_value.first = mock_locator
+
+    def evaluate_side_effect(script, *args):
+        if "checkStatus" in str(script):
+            return {"targetChecked": True, "oppChecked": False}
+        return True
+
+    mock_page.evaluate.side_effect = evaluate_side_effect
+
+    res = publisher._set_coppa_audience(mock_page, is_made_for_kids=False)
+    assert res is True
+

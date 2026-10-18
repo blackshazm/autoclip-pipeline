@@ -42,7 +42,7 @@ def setup_test_db(conn: sqlite3.Connection):
             tiktok_status TEXT DEFAULT 'PENDING',
             scheduled_for TEXT,
             error_log TEXT,
-            created_at TEXT DEFAULT '2026-10-08T12:00:00Z'
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE publishing_accounts (

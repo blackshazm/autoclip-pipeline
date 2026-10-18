@@ -1,18 +1,16 @@
 """
 Módulo de Configuração Tipada via Pydantic Settings.
 """
+
 from pathlib import Path
 from typing import List
 import json
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
 
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Diretórios
     BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
@@ -24,8 +22,8 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO")
 
     # Supoclip
-    SUPOCLIP_API_URL: str = Field(default="http://localhost:8000")
-    SUPOCLIP_TIMEOUT_SECONDS: int = Field(default=600)
+    SUPOCLIP_API_URL: str = Field(default="http://127.0.0.1:8000")
+    SUPOCLIP_TIMEOUT_SECONDS: int = Field(default=0)  # 0 = timeout desativado (infinito)
     SUPOCLIP_MAX_RETRIES: int = Field(default=3)
     SUPOCLIP_USER_ID: str = Field(default="")
     SUPOCLIP_AUTH_SECRET: str = Field(default="change_me_backend_auth_secret")
@@ -61,11 +59,9 @@ class Settings(BaseSettings):
 
     # Agendamento e Buffer Anti-Spam
     TIMEZONE: str = Field(default="America/Sao_Paulo")
-    POST_INTERVAL_MINUTES: int = Field(default=15)
-    MIN_SAME_VIDEO_INTERVAL_MINUTES: int = Field(default=15)
-    DEFAULT_POSTING_WINDOWS: List[str] = Field(
-        default=["09:00", "11:30", "13:30", "15:30", "17:30", "19:30", "21:30"]
-    )
+    POST_INTERVAL_MINUTES: int = Field(default=25)
+    MIN_SAME_VIDEO_INTERVAL_MINUTES: int = Field(default=25)
+    DEFAULT_POSTING_WINDOWS: List[str] = Field(default=["09:00", "11:30", "13:30", "15:30", "17:30", "19:30", "21:30"])
     MAX_CLIP_AGE_DAYS: int = Field(default=7)
 
     # Limpeza e Proteção de Disco
@@ -88,6 +84,8 @@ class Settings(BaseSettings):
     YOUTUBE_BROWSER_STATE_FILE: Path = Field(default=Path("./config/youtube_state.json"))
     YOUTUBE_BROWSER_HEADLESS: bool = Field(default=True)
     YOUTUBE_BROWSER_FALLBACK_TO_API: bool = Field(default=True)
+    YOUTUBE_BROWSER_ENGINE: str = Field(default="pro")  # "pro" ou "classic"
+    YOUTUBE_DEFAULT_AI_DISCLOSURE: bool = Field(default=True)
 
     # Credenciais e Automação TikTok
     TIKTOK_PUBLISHER_MODE: str = Field(default="browser")  # "browser" ou "official"
@@ -106,8 +104,12 @@ class Settings(BaseSettings):
     LLM_TIMEOUT_SECONDS: int = Field(default=120)
     LLM_TEMPERATURE: float = Field(default=0.3)
     LLM_MAX_RETRIES: int = Field(default=2)
-    MAX_COPIES_PER_CYCLE: int = Field(default=12)
-    MAX_PUBLICATIONS_PER_CYCLE: int = Field(default=5)
+    MAX_COPIES_PER_CYCLE: int = Field(default=24)
+    MAX_PUBLICATIONS_PER_CYCLE: int = Field(default=50)
+
+    # Dashboard Web
+    DASHBOARD_HOST: str = Field(default="127.0.0.1")
+    DASHBOARD_PORT: int = Field(default=8085)
 
     # Notificações e Webhooks
     DISCORD_WEBHOOK_URL: str = Field(default="")
@@ -145,6 +147,7 @@ class Settings(BaseSettings):
         self.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         self.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         self.LOG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # Singleton global de configurações
 settings = Settings()

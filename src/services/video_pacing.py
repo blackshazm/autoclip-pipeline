@@ -6,12 +6,13 @@ Aplica técnicas avançadas com FFmpeg:
 3. Seamless Loop: Detecção e eliminação de cauda de silêncio (tail trimming) e micro-fades
    de áudio anti-pop (zero-crossing smoothing) para retenção >100% em vídeos repetidos.
 """
+
 import subprocess
 import shutil
 import time
 import re
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from src.core.config import settings
 from src.core.logger import get_logger
@@ -25,7 +26,7 @@ def detect_tail_silence(
     total_duration: float,
     threshold_db: int = -35,
     min_silence_sec: float = 0.20,
-    max_tail_window_sec: float = 3.0
+    max_tail_window_sec: float = 3.0,
 ) -> Optional[float]:
     """
     Analisa o áudio do arquivo e detecta se há silêncio morto na cauda final do vídeo.
@@ -35,10 +36,15 @@ def detect_tail_silence(
         return None
 
     cmd = [
-        "ffmpeg", "-hide_banner",
-        "-i", str(clip_path),
-        "-af", f"silencedetect=n={threshold_db}dB:d={min_silence_sec}",
-        "-f", "null", "-"
+        "ffmpeg",
+        "-hide_banner",
+        "-i",
+        str(clip_path),
+        "-af",
+        f"silencedetect=n={threshold_db}dB:d={min_silence_sec}",
+        "-f",
+        "null",
+        "-",
     ]
 
     try:
@@ -72,9 +78,7 @@ def detect_tail_silence(
 
 
 def optimize_clip_pacing(
-    clip_path: Path,
-    speed_factor: Optional[float] = None,
-    enable_loop: Optional[bool] = None
+    clip_path: Path, speed_factor: Optional[float] = None, enable_loop: Optional[bool] = None
 ) -> bool:
     """
     Otimiza ritmo e retenção do vídeo em passagem única no FFmpeg:
@@ -141,24 +145,37 @@ def optimize_clip_pacing(
     temp_output = clip_path.with_suffix(".pacing.tmp.mp4")
 
     cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg",
+        "-y",
     ]
     if tail_trim_timestamp is not None:
         cmd.extend(["-t", str(tail_trim_timestamp)])
 
-    cmd.extend([
-        "-i", str(clip_path),
-        "-filter_complex", filter_complex,
-        "-map", "[v]",
-        "-map", "[a]",
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "22",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-movflags", "+faststart",
-        str(temp_output)
-    ])
+    cmd.extend(
+        [
+            "-i",
+            str(clip_path),
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[v]",
+            "-map",
+            "[a]",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "22",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "+faststart",
+            str(temp_output),
+        ]
+    )
 
     start_time = time.time()
     try:
@@ -178,19 +195,31 @@ def optimize_clip_pacing(
             cmd_fallback = ["ffmpeg", "-y"]
             if tail_trim_timestamp is not None:
                 cmd_fallback.extend(["-t", str(tail_trim_timestamp)])
-            cmd_fallback.extend([
-                "-i", str(clip_path),
-                "-filter_complex", fallback_filter,
-                "-map", "[v]",
-                "-map", "[a]",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "22",
-                "-c:a", "aac",
-                "-b:a", "128k",
-                "-movflags", "+faststart",
-                str(temp_output)
-            ])
+            cmd_fallback.extend(
+                [
+                    "-i",
+                    str(clip_path),
+                    "-filter_complex",
+                    fallback_filter,
+                    "-map",
+                    "[v]",
+                    "-map",
+                    "[a]",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "22",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "128k",
+                    "-movflags",
+                    "+faststart",
+                    str(temp_output),
+                ]
+            )
             res = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=120)
 
         if res.returncode != 0:
@@ -215,7 +244,7 @@ def optimize_clip_pacing(
         logger.info(
             f"Otimização concluída com sucesso para {clip_path.name} em {elapsed}s "
             f"(Pacing={factor}x, Duração={final_duration:.2f}s).",
-            extra={"event": "pacing_optimized", "clip": clip_path.name, "elapsed": elapsed}
+            extra={"event": "pacing_optimized", "clip": clip_path.name, "elapsed": elapsed},
         )
         return True
 

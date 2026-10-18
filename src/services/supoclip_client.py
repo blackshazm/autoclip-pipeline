@@ -3,9 +3,9 @@ Cliente HTTP para Integracao com o Motor de Corte Supoclip (Docker/API Local).
 Suporta envio real para FastAPI (/upload e /tasks/create) com autenticacao HMAC,
 alem de fallback mock para desenvolvimento e testes.
 """
+
 import time
 import uuid
-import json
 import hmac
 import hashlib
 import subprocess
@@ -22,22 +22,22 @@ from src.core.exceptions import SupoclipError
 
 logger = get_logger("supoclip_client")
 
+
 class SupoclipClient:
     def __init__(self, base_url: Optional[str] = None):
         self.base_url = (base_url or settings.SUPOCLIP_API_URL).rstrip("/")
-        self.timeout = settings.SUPOCLIP_TIMEOUT_SECONDS
+        self.timeout = (
+            settings.SUPOCLIP_TIMEOUT_SECONDS
+            if getattr(settings, "SUPOCLIP_TIMEOUT_SECONDS", 0) > 0
+            else None
+        )
         self.is_mock = settings.MOCK_SUPOCLIP
         self.user_id = settings.SUPOCLIP_USER_ID
         self.auth_secret = getattr(settings, "SUPOCLIP_AUTH_SECRET", "change_me_backend_auth_secret")
         self.api_key = getattr(settings, "SUPOCLIP_API_KEY", "")
 
         self.session = requests.Session()
-        retries = Retry(
-            total=3,
-            backoff_factor=1.0,
-            status_forcelist=[502, 503, 504],
-            raise_on_status=False
-        )
+        retries = Retry(total=3, backoff_factor=1.0, status_forcelist=[502, 503, 504], raise_on_status=False)
         adapter = HTTPAdapter(max_retries=retries)
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
@@ -47,9 +47,7 @@ class SupoclipClient:
             return {"x-api-key": self.api_key}
         ts = str(int(time.time()))
         sig = hmac.new(
-            self.auth_secret.encode("utf-8"),
-            f"{self.user_id}:{ts}".encode("utf-8"),
-            hashlib.sha256
+            self.auth_secret.encode("utf-8"), f"{self.user_id}:{ts}".encode("utf-8"), hashlib.sha256
         ).hexdigest()
         return {
             "x-supoclip-user-id": self.user_id,
@@ -65,7 +63,9 @@ class SupoclipClient:
         """
         if self.is_mock:
             job_id = f"mock-job-{uuid.uuid4().hex[:8]}"
-            logger.info(f"[MOCK] Job submetido com sucesso: {job_id}", extra={"event": "supoclip_mock_submit", "job_id": job_id})
+            logger.info(
+                f"[MOCK] Job submetido com sucesso: {job_id}", extra={"event": "supoclip_mock_submit", "job_id": job_id}
+            )
             return job_id
 
         if not video_path.exists():
@@ -97,10 +97,7 @@ class SupoclipClient:
         # 2. Criacao da tarefa de corte
         create_task_url = f"{self.base_url}/tasks/create"
         payload = {
-            "source": {
-                "url": video_ref,
-                "title": video_path.stem
-            },
+            "source": {"url": video_ref, "title": video_path.stem},
             "output_format": "vertical",
             "processing_mode": "fast",
             "add_subtitles": True,
@@ -111,8 +108,8 @@ class SupoclipClient:
             "cleanup_settings": {
                 "cut_long_pauses": getattr(settings, "CUT_LONG_PAUSES", True),
                 "pause_threshold_ms": getattr(settings, "PAUSE_THRESHOLD_MS", 400),
-                "remove_filler_words": False
-            }
+                "remove_filler_words": False,
+            },
         }
         try:
             headers_json = self._get_auth_headers()
@@ -128,7 +125,10 @@ class SupoclipClient:
             if not task_id:
                 raise SupoclipError(f"Resposta de criacao sem task_id: {task_data}")
 
-            logger.info(f"Tarefa de corte criada no Supoclip: {task_id}", extra={"event": "supoclip_task_created", "task_id": task_id})
+            logger.info(
+                f"Tarefa de corte criada no Supoclip: {task_id}",
+                extra={"event": "supoclip_task_created", "task_id": task_id},
+            )
             return str(task_id)
         except requests.RequestException as e:
             raise SupoclipError(f"Falha ao despachar tarefa no Supoclip ({create_task_url}): {e}")
@@ -182,7 +182,20 @@ class SupoclipClient:
                                         for chunk in r.iter_content(chunk_size=65536):
                                             f_out.write(chunk)
                                     if temp_clip_path.exists() and temp_clip_path.stat().st_size > 0:
-                                        temp_clip_path.replace(local_clip_path)
+                                        import time
+                                        import shutil
+                                        replaced = False
+                                        for attempt in range(5):
+                                            try:
+                                                if local_clip_path.exists():
+                                                    local_clip_path.unlink(missing_ok=True)
+                                                temp_clip_path.replace(local_clip_path)
+                                                replaced = True
+                                                break
+                                            except OSError:
+                                                time.sleep(0.5)
+                                        if not replaced:
+                                            shutil.move(str(temp_clip_path), str(local_clip_path))
                                     else:
                                         temp_clip_path.unlink(missing_ok=True)
                                         logger.warning(f"Download do corte {clip_id} resultou em arquivo vazio.")
@@ -217,49 +230,47 @@ class SupoclipClient:
 
                     hook_title = c.get("hook_title") or ""
                     if not series_id and hook_title:
-                        p_match = re.search(r'\[Parte\s*(\d+)/(\d+)\]', hook_title, re.IGNORECASE)
+                        p_match = re.search(r"\[Parte\s*(\d+)/(\d+)\]", hook_title, re.IGNORECASE)
                         if p_match:
                             series_id = f"series-{job_id}"
                             part_number = int(p_match.group(1))
                             total_parts = int(p_match.group(2))
 
-                    clips.append({
-                        "clip_uid": clip_id,
-                        "file_path": str(local_clip_path),
-                        "start_seconds": c.get("start_time"),
-                        "end_seconds": c.get("end_time"),
-                        "duration_seconds": float(c.get("duration") or 0),
-                        "virality_score": virality,
-                        "transcription_path": str(local_transcript_path),
-                        "width": 1080,
-                        "height": 1920,
-                        "fps": 30.0,
-                        "subtitle_mode": "burned",
-                        "crop_mode": "face_center",
-                        "series_id": series_id,
-                        "part_number": part_number,
-                        "total_parts": total_parts,
-                        "hook_title": hook_title,
-                    })
+                    clips.append(
+                        {
+                            "clip_uid": clip_id,
+                            "file_path": str(local_clip_path),
+                            "start_seconds": c.get("start_time"),
+                            "end_seconds": c.get("end_time"),
+                            "duration_seconds": float(c.get("duration") or 0),
+                            "virality_score": virality,
+                            "transcription_path": str(local_transcript_path),
+                            "width": 1080,
+                            "height": 1920,
+                            "fps": 30.0,
+                            "subtitle_mode": "burned",
+                            "crop_mode": "face_center",
+                            "series_id": series_id,
+                            "part_number": part_number,
+                            "total_parts": total_parts,
+                            "hook_title": hook_title,
+                        }
+                    )
 
-                return {
-                    "job_id": job_id,
-                    "status": "COMPLETED",
-                    "clips": clips
-                }
+                return {"job_id": job_id, "status": "COMPLETED", "clips": clips}
 
             elif backend_status in ("failed", "error", "cancelled"):
                 return {
                     "job_id": job_id,
                     "status": "FAILED",
-                    "error": task.get("error_code") or task.get("progress_message") or "Supoclip processing failed"
+                    "error": task.get("error_code") or task.get("progress_message") or "Supoclip processing failed",
                 }
             else:
                 return {
                     "job_id": job_id,
                     "status": "PROCESSING",
                     "progress": task.get("progress", 0),
-                    "message": task.get("progress_message", "Processando corte...")
+                    "message": task.get("progress_message", "Processando corte..."),
                 }
 
         except requests.RequestException as e:
@@ -274,7 +285,7 @@ class SupoclipClient:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         clips: List[Dict[str, Any]] = []
-        scores = [88, 76, 52] # 2 qualificados (>=70) e 1 reprovado (<70)
+        scores = [88, 76, 52]  # 2 qualificados (>=70) e 1 reprovado (<70)
 
         for i, score in enumerate(scores, 1):
             clip_uid = f"{job_id}-clip-{i}"
@@ -293,12 +304,28 @@ class SupoclipClient:
             # Gera um video vertical 9:16 sintetico curto de 5s usando ffmpeg caso nao exista
             if not clip_path.exists():
                 cmd = [
-                    "ffmpeg", "-y",
-                    "-f", "lavfi", "-i", "color=c=black:s=1080x1920:d=5:r=30",
-                    "-f", "lavfi", "-i", "sine=f=440:d=5",
-                    "-c:v", "libx264", "-tune", "stillimage", "-pix_fmt", "yuv420p",
-                    "-c:a", "aac", "-b:a", "128k", "-shortest",
-                    str(clip_path)
+                    "ffmpeg",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=1080x1920:d=5:r=30",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=f=440:d=5",
+                    "-c:v",
+                    "libx264",
+                    "-tune",
+                    "stillimage",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "128k",
+                    "-shortest",
+                    str(clip_path),
                 ]
                 try:
                     subprocess.run(cmd, capture_output=True, timeout=15)
@@ -306,23 +333,21 @@ class SupoclipClient:
                     with open(clip_path, "wb") as f:
                         f.write(b"\x00" * 1024)
 
-            clips.append({
-                "clip_uid": clip_uid,
-                "file_path": str(clip_path),
-                "start_seconds": float(i * 60),
-                "end_seconds": float(i * 60 + 58),
-                "duration_seconds": 58.0,
-                "virality_score": score,
-                "transcription_path": str(transcription_path),
-                "width": 1080,
-                "height": 1920,
-                "fps": 30.0,
-                "subtitle_mode": "burned",
-                "crop_mode": "face_center"
-            })
+            clips.append(
+                {
+                    "clip_uid": clip_uid,
+                    "file_path": str(clip_path),
+                    "start_seconds": float(i * 60),
+                    "end_seconds": float(i * 60 + 58),
+                    "duration_seconds": 58.0,
+                    "virality_score": score,
+                    "transcription_path": str(transcription_path),
+                    "width": 1080,
+                    "height": 1920,
+                    "fps": 30.0,
+                    "subtitle_mode": "burned",
+                    "crop_mode": "face_center",
+                }
+            )
 
-        return {
-            "job_id": job_id,
-            "status": "COMPLETED",
-            "clips": clips
-        }
+        return {"job_id": job_id, "status": "COMPLETED", "clips": clips}
