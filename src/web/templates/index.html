@@ -1503,6 +1503,32 @@
                         let tick = 0;
                         let lastTime = performance.now();
 
+                        // Preload dos assets oficiais do Pixel Agents
+                        if (!this.pixelAssets) {
+                            this.pixelAssets = {
+                                chars: [],
+                                desk: new Image(),
+                                pc1: new Image(),
+                                pc2: new Image(),
+                                pcOff: new Image(),
+                                coffee: new Image(),
+                                sofa: new Image(),
+                                cat: new Image()
+                            };
+                            for (let i = 0; i < 6; i++) {
+                                const c = new Image();
+                                c.src = `/static/pixel-agents/characters/char_${i}.png`;
+                                this.pixelAssets.chars.push(c);
+                            }
+                            this.pixelAssets.desk.src = '/static/pixel-agents/furniture/DESK/DESK_FRONT.png';
+                            this.pixelAssets.pc1.src = '/static/pixel-agents/furniture/PC/PC_FRONT_ON_1.png';
+                            this.pixelAssets.pc2.src = '/static/pixel-agents/furniture/PC/PC_FRONT_ON_2.png';
+                            this.pixelAssets.pcOff.src = '/static/pixel-agents/furniture/PC/PC_FRONT_OFF.png';
+                            this.pixelAssets.coffee.src = '/static/pixel-agents/furniture/COFFEE/COFFEE.png';
+                            this.pixelAssets.sofa.src = '/static/pixel-agents/furniture/SOFA/SOFA_FRONT.png';
+                            this.pixelAssets.cat.src = '/static/pixel-agents/pets/cat/pet.png';
+                        }
+
                         // Partículas de dados da esteira
                         const dataParticles = [];
                         for (let p = 0; p < 24; p++) {
@@ -1588,19 +1614,33 @@
 
                                 // Se for o Coffee Lounge
                                 if (st.role === 'lounge') {
-                                    // Sofá / Lounge
-                                    ctx.fillStyle = '#1e293b';
-                                    ctx.fillRect(st.x + 10, st.y + 20, 110, 48);
-                                    ctx.strokeStyle = '#334155';
-                                    ctx.strokeRect(st.x + 10, st.y + 20, 110, 48);
+                                    // Sofá / Lounge Oficial do Pixel Agents
+                                    if (this.pixelAssets && this.pixelAssets.sofa.complete && this.pixelAssets.sofa.naturalWidth > 0) {
+                                        ctx.drawImage(this.pixelAssets.sofa, st.x + 10, st.y + 16, 110, 52);
+                                    } else {
+                                        ctx.fillStyle = '#1e293b';
+                                        ctx.fillRect(st.x + 10, st.y + 20, 110, 48);
+                                        ctx.strokeStyle = '#334155';
+                                        ctx.strokeRect(st.x + 10, st.y + 20, 110, 48);
+                                    }
 
-                                    // Máquina de Café Expresso
-                                    ctx.fillStyle = '#0f172a';
-                                    ctx.fillRect(st.x + 140, st.y + 12, 42, 58);
-                                    ctx.fillStyle = '#ef4444';
-                                    ctx.fillRect(st.x + 148, st.y + 20, 6, 6);
-                                    ctx.fillStyle = (tick % 20 < 10) ? '#10b981' : '#059669';
-                                    ctx.fillRect(st.x + 162, st.y + 20, 6, 6);
+                                    // Máquina de Café Oficial
+                                    if (this.pixelAssets && this.pixelAssets.coffee.complete && this.pixelAssets.coffee.naturalWidth > 0) {
+                                        ctx.drawImage(this.pixelAssets.coffee, st.x + 140, st.y + 12, 42, 58);
+                                    } else {
+                                        ctx.fillStyle = '#0f172a';
+                                        ctx.fillRect(st.x + 140, st.y + 12, 42, 58);
+                                        ctx.fillStyle = '#ef4444';
+                                        ctx.fillRect(st.x + 148, st.y + 20, 6, 6);
+                                        ctx.fillStyle = (tick % 20 < 10) ? '#10b981' : '#059669';
+                                        ctx.fillRect(st.x + 162, st.y + 20, 6, 6);
+                                    }
+
+                                    // Gatinho Mascote do Escritório (Pixel Agents Pet)
+                                    if (this.pixelAssets && this.pixelAssets.cat.complete && this.pixelAssets.cat.naturalWidth > 0) {
+                                        const petFrame = (tick % 30 < 15 ? 0 : 16);
+                                        ctx.drawImage(this.pixelAssets.cat, petFrame, 0, 16, 16, st.x + 50, st.y + 36, 28, 28);
+                                    }
 
                                     // Vapor de café animado
                                     ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
@@ -1616,87 +1656,90 @@
                                     return;
                                 }
 
-                                // Mesa de Trabalho (Madeira escura e metal)
-                                ctx.fillStyle = '#1e2538';
-                                ctx.fillRect(st.x + 10, st.y + 36, st.width - 20, 40);
-                                ctx.strokeStyle = isPaused ? '#ef4444' : '#38466b';
-                                ctx.lineWidth = 1;
-                                ctx.strokeRect(st.x + 10, st.y + 36, st.width - 20, 40);
-
-                                // Monitor de Computador
-                                const monX = st.x + 28;
-                                const monY = st.y + 14;
-                                ctx.fillStyle = '#0f172a';
-                                ctx.fillRect(monX, monY, 44, 28);
-                                ctx.strokeStyle = '#475569';
-                                ctx.strokeRect(monX, monY, 44, 28);
-
-                                // Tela do Monitor (Piscando código se ativo)
-                                if (isPaused) {
-                                    ctx.fillStyle = '#1e1e24';
-                                    ctx.fillRect(monX + 3, monY + 3, 38, 22);
-                                    ctx.fillStyle = '#ef4444';
-                                    ctx.font = '8px monospace';
-                                    ctx.fillText('PAUSE', monX + 8, monY + 16);
+                                // Mesa de Trabalho Oficial do Pixel Agents
+                                if (this.pixelAssets && this.pixelAssets.desk.complete && this.pixelAssets.desk.naturalWidth > 0) {
+                                    ctx.drawImage(this.pixelAssets.desk, st.x + 8, st.y + 30, st.width - 16, 48);
                                 } else {
-                                    ctx.fillStyle = '#061325';
-                                    ctx.fillRect(monX + 3, monY + 3, 38, 22);
-                                    ctx.fillStyle = (st.role === 'youtube') ? '#f43f5e' : ((st.role === 'ai') ? '#a855f7' : '#06b6d4');
-                                    // Linhas de código animadas
-                                    const lineShift = (tick % 12);
-                                    ctx.fillRect(monX + 6, monY + 6 + (lineShift % 16), 18, 2);
-                                    ctx.fillRect(monX + 6, monY + 11, 26, 2);
-                                    ctx.fillRect(monX + 6, monY + 16, 12, 2);
+                                    ctx.fillStyle = '#1e2538';
+                                    ctx.fillRect(st.x + 10, st.y + 36, st.width - 20, 40);
+                                    ctx.strokeStyle = isPaused ? '#ef4444' : '#38466b';
+                                    ctx.lineWidth = 1;
+                                    ctx.strokeRect(st.x + 10, st.y + 36, st.width - 20, 40);
                                 }
 
-                                // Suporte do monitor
-                                ctx.fillStyle = '#334155';
-                                ctx.fillRect(monX + 18, monY + 28, 8, 8);
+                                // Monitor de Computador Oficial do Pixel Agents
+                                const monX = st.x + 24;
+                                const monY = st.y + 12;
+                                const pcImg = isPaused ? this.pixelAssets.pcOff : ((tick % 16 < 8) ? this.pixelAssets.pc1 : this.pixelAssets.pc2);
 
-                                // Teclado
-                                ctx.fillStyle = '#334155';
-                                ctx.fillRect(monX + 6, monY + 40, 32, 8);
+                                if (pcImg && pcImg.complete && pcImg.naturalWidth > 0) {
+                                    ctx.drawImage(pcImg, monX, monY, 46, 36);
+                                } else {
+                                    ctx.fillStyle = '#0f172a';
+                                    ctx.fillRect(monX, monY, 44, 28);
+                                    ctx.strokeStyle = '#475569';
+                                    ctx.strokeRect(monX, monY, 44, 28);
 
-                                // --- O ROBÔ PIXEL ---
+                                    if (isPaused) {
+                                        ctx.fillStyle = '#1e1e24';
+                                        ctx.fillRect(monX + 3, monY + 3, 38, 22);
+                                        ctx.fillStyle = '#ef4444';
+                                        ctx.font = '8px monospace';
+                                        ctx.fillText('PAUSE', monX + 8, monY + 16);
+                                    } else {
+                                        ctx.fillStyle = '#061325';
+                                        ctx.fillRect(monX + 3, monY + 3, 38, 22);
+                                        ctx.fillStyle = (st.role === 'youtube') ? '#f43f5e' : ((st.role === 'ai') ? '#a855f7' : '#06b6d4');
+                                        const lineShift = (tick % 12);
+                                        ctx.fillRect(monX + 6, monY + 6 + (lineShift % 16), 18, 2);
+                                        ctx.fillRect(monX + 6, monY + 11, 26, 2);
+                                        ctx.fillRect(monX + 6, monY + 16, 12, 2);
+                                    }
+                                }
+
+                                // --- PERSONAGEM OFICIAL DO PIXEL AGENTS ---
                                 const botX = st.x + st.width - 56;
-                                const botY = st.y + 22;
+                                const botY = st.y + 18;
+                                const charIndex = this.robotStations.indexOf(st) % 6;
+                                const charSprite = this.pixelAssets && this.pixelAssets.chars[charIndex];
 
-                                // Cadeira do robô
-                                ctx.fillStyle = '#111827';
-                                ctx.fillRect(botX - 4, botY + 18, 28, 30);
-
-                                // Corpo do robô
-                                ctx.fillStyle = isPaused ? '#475569' : '#3b82f6';
-                                ctx.fillRect(botX, botY + 12, 20, 22);
-
-                                // Cabeça do robô
-                                ctx.fillStyle = isPaused ? '#64748b' : '#93c5fd';
-                                ctx.fillRect(botX + 2, botY - 4, 16, 14);
-
-                                // Antena
-                                ctx.fillStyle = '#64748b';
-                                ctx.fillRect(botX + 9, botY - 10, 2, 6);
-                                // Luz da antena piscando
-                                ctx.fillStyle = isPaused ? '#ef4444' : ((tick % 16 < 8) ? '#10b981' : '#06b6d4');
-                                ctx.fillRect(botX + 8, botY - 12, 4, 3);
-
-                                // Olhos do robô
-                                if (isPaused) {
-                                    ctx.fillStyle = '#1e293b';
-                                    ctx.fillRect(botX + 5, botY, 3, 2);
-                                    ctx.fillRect(botX + 12, botY, 3, 2);
+                                if (charSprite && charSprite.complete && charSprite.naturalWidth > 0) {
+                                    // Spritesheet oficial: 112x96 (3 linhas x 7 frames de 16x32)
+                                    // Linha 0 (sy = 0) = Direção DOWN / Frente
+                                    // Frame 0 (sx = 0) = Idle / Sentado
+                                    // Frames 5 e 6 (sx = 80 e 96) = Digitação no teclado (Typing animation)
+                                    const sx = isPaused ? 0 : ((tick % 12 < 6) ? 80 : 96);
+                                    const sy = 0;
+                                    ctx.drawImage(charSprite, sx, sy, 16, 32, botX - 4, botY - 8, 30, 60);
                                 } else {
-                                    const blink = (tick % 60 > 56);
-                                    ctx.fillStyle = blink ? '#1e3a8a' : '#0284c7';
-                                    ctx.fillRect(botX + 5, botY, 3, blink ? 1 : 4);
-                                    ctx.fillRect(botX + 12, botY, 3, blink ? 1 : 4);
-                                }
+                                    // Fallback geométrico robô
+                                    ctx.fillStyle = '#111827';
+                                    ctx.fillRect(botX - 4, botY + 18, 28, 30);
+                                    ctx.fillStyle = isPaused ? '#475569' : '#3b82f6';
+                                    ctx.fillRect(botX, botY + 12, 20, 22);
+                                    ctx.fillStyle = isPaused ? '#64748b' : '#93c5fd';
+                                    ctx.fillRect(botX + 2, botY - 4, 16, 14);
+                                    ctx.fillStyle = '#64748b';
+                                    ctx.fillRect(botX + 9, botY - 10, 2, 6);
+                                    ctx.fillStyle = isPaused ? '#ef4444' : ((tick % 16 < 8) ? '#10b981' : '#06b6d4');
+                                    ctx.fillRect(botX + 8, botY - 12, 4, 3);
 
-                                // Braços digitando (Animação de frame alternado)
-                                ctx.fillStyle = isPaused ? '#475569' : '#60a5fa';
-                                const typeFrame = !isPaused && (tick % 8 < 4);
-                                ctx.fillRect(botX - 4, botY + 14 + (typeFrame ? 2 : 0), 6, 6);
-                                ctx.fillRect(botX - 8, botY + 22, 6, 4);
+                                    if (isPaused) {
+                                        ctx.fillStyle = '#1e293b';
+                                        ctx.fillRect(botX + 5, botY, 3, 2);
+                                        ctx.fillRect(botX + 12, botY, 3, 2);
+                                    } else {
+                                        const blink = (tick % 60 > 56);
+                                        ctx.fillStyle = blink ? '#1e3a8a' : '#0284c7';
+                                        ctx.fillRect(botX + 5, botY, 3, blink ? 1 : 4);
+                                        ctx.fillRect(botX + 12, botY, 3, blink ? 1 : 4);
+                                    }
+
+                                    ctx.fillStyle = isPaused ? '#475569' : '#60a5fa';
+                                    const typeFrame = !isPaused && (tick % 8 < 4);
+                                    ctx.fillRect(botX - 4, botY + 14 + (typeFrame ? 2 : 0), 6, 6);
+                                    ctx.fillRect(botX - 8, botY + 22, 6, 4);
+                                }
 
                                 // Detalhes especiais por tipo de robô
                                 if (st.role === 'radar') {

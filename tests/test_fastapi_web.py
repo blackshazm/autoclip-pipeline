@@ -148,3 +148,10 @@ def test_telemetry_endpoint(client):
     assert "stats" in data["data"]
     assert "disk" in data["data"]
     assert "system_memory" in data["data"]
+
+def test_pixel_agents_static_assets_served(client):
+    """Garante que os spritesheets oficiais do Pixel Agents são servidos via /static."""
+    res = client.get("/static/pixel-agents/characters/char_0.png")
+    assert res.status_code == 200
+    assert "image/png" in res.headers["content-type"]
+    assert len(res.content) > 1000

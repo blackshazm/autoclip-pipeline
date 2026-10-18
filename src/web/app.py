@@ -40,6 +40,12 @@ app.include_router(channels_router)
 app.include_router(logs_router)
 app.include_router(telemetry_router)
 
+from fastapi.staticfiles import StaticFiles
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 
