@@ -650,6 +650,109 @@
             font-size: 11px;
             font-weight: 600;
         }
+
+        /* PIXEL OFFICE HQ ESTILOS */
+        .view-toggle {
+            display: inline-flex;
+            background: rgba(13, 18, 31, 0.95);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 4px;
+            gap: 4px;
+        }
+
+        .view-toggle-btn {
+            padding: 7px 14px;
+            font-size: 12px;
+            font-weight: 700;
+            border-radius: 8px;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .view-toggle-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .view-toggle-btn.active {
+            background: linear-gradient(135deg, var(--primary) 0%, #4f46e5 100%);
+            color: #fff;
+            box-shadow: 0 0 14px var(--primary-glow);
+        }
+
+        .pixel-office-section {
+            background: linear-gradient(180deg, rgba(13, 18, 31, 0.95) 0%, rgba(8, 12, 22, 0.98) 100%);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 24px;
+            box-shadow: 0 12px 32px -6px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+            position: relative;
+        }
+
+        .pixel-office-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .pixel-canvas-wrapper {
+            position: relative;
+            width: 100%;
+            height: 480px;
+            background: #060810;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #pixelOfficeCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+
+        .pixel-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-top: 14px;
+            font-size: 11px;
+            color: var(--text-muted);
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px 16px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .pixel-legend-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+            align-items: center;
+        }
+
+        .pixel-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
     </style>
 </head>
 <body x-data="dashboardApp()" x-init="init()">
@@ -662,7 +765,19 @@
                 <span class="badge-live"><span class="pulse-dot"></span> Online</span>
             </h1>
         </div>
-        <div class="header-actions">
+        <div class="header-actions" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <!-- SELETOR DE VISUALIZAÇÃO: PIXEL OFFICE / HÍBRIDO / CLÁSSICO -->
+            <div class="view-toggle">
+                <button class="view-toggle-btn" :class="{ 'active': currentView === 'office' }" @click="setView('office')">
+                    🏢 Escritório Pixel
+                </button>
+                <button class="view-toggle-btn" :class="{ 'active': currentView === 'both' }" @click="setView('both')">
+                    ⚡ Híbrido
+                </button>
+                <button class="view-toggle-btn" :class="{ 'active': currentView === 'classic' }" @click="setView('classic')">
+                    📊 Clássico
+                </button>
+            </div>
             <button class="btn btn-danger" @click="pauseAll()">⏸️ Pausar Tudo</button>
             <button class="btn btn-primary" @click="resumeAll()">▶️ Retomar Tudo</button>
             <button class="btn" @click="retryDLQ()">🔄 Reprocessar Falhas</button>
@@ -716,8 +831,57 @@
         </div>
     </section>
 
-    <!-- PAINEL DE CONTROLE DE ROBOS -->
-    <section class="robots-panel">
+    <!-- PIXEL OFFICE HQ • ESCRITÓRIO VIRTUAL DOS AGENTES -->
+    <section class="pixel-office-section" x-show="currentView === 'office' || currentView === 'both'">
+        <div class="pixel-office-header">
+            <div>
+                <h2 style="font-size: 18px; font-weight: 800; display: flex; align-items: center; gap: 8px;">
+                    🏢 Pixel Office HQ • Empresa Virtual de Cortes
+                    <span style="font-size: 11px; padding: 2px 8px; border-radius: 9999px; background: rgba(99, 102, 241, 0.2); border: 1px solid rgba(99, 102, 241, 0.4); color: var(--primary-light); font-weight: 700;">
+                        AutoClip Live Engine
+                    </span>
+                </h2>
+                <span style="font-size: 12px; color: var(--text-muted);">
+                    Simulação retro 16-bit com telemetria direta do SQLite WAL e Docker SupoClip. Clique nos robôs para inspecionar ou pausar.
+                </span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <span style="font-size: 11px; color: var(--cyan); background: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.2); padding: 4px 10px; border-radius: 6px;" x-text="'FPS: 30 | Robôs Ativos: ' + activeRobotsCount"></span>
+            </div>
+        </div>
+
+        <div class="pixel-canvas-wrapper" id="pixelCanvasContainer">
+            <canvas id="pixelOfficeCanvas" width="1120" height="460" @click="handleCanvasClick($event)" @mousemove="handleCanvasMouseMove($event)" @mouseleave="handleCanvasMouseLeave()"></canvas>
+        </div>
+
+        <div class="pixel-legend">
+            <div class="pixel-legend-group">
+                <span style="font-weight: 700; color: #fff; margin-right: 4px;">Legenda de Status:</span>
+                <div class="pixel-legend-item">
+                    <span style="color: var(--success); font-size: 14px;">⚡</span>
+                    <span>Operando / Minerando / Cortando</span>
+                </div>
+                <div class="pixel-legend-item">
+                    <span style="color: var(--cyan); font-size: 14px;">☕</span>
+                    <span>Pacing / Intervalo de Segurança</span>
+                </div>
+                <div class="pixel-legend-item">
+                    <span style="color: var(--danger); font-size: 14px;">💤</span>
+                    <span>Pausado / Standby</span>
+                </div>
+                <div class="pixel-legend-item">
+                    <span style="color: var(--warning); font-size: 14px;">⚠️</span>
+                    <span>Alerta / Quota de API</span>
+                </div>
+            </div>
+            <div style="font-size: 11px; color: var(--text-dim);">
+                💡 Dica: Passe o mouse para iluminar a estação e clique para abrir os controles.
+            </div>
+        </div>
+    </section>
+
+    <!-- PAINEL DE CONTROLE DE ROBOS CLÁSSICO -->
+    <section class="robots-panel" x-show="currentView === 'classic' || currentView === 'both'">
         <div class="robots-panel-header">
             <h2>🤖 Mesa de Operações dos Robôs</h2>
             <div style="font-size: 12px; color: var(--text-muted);">Controle individual em tempo real com SQLite WAL</div>
@@ -935,6 +1099,39 @@
                         <span x-text="channelLoading ? '⏳ Resolvendo Canal...' : '💾 Cadastrar Canal'"></span>
                     </button>
                 </div>
+    <!-- MODAL DE INSPEÇÃO DO ROBÔ PIXEL -->
+    <div class="modal-overlay" x-show="selectedRobotModal" x-cloak style="display: none;">
+        <div class="modal-card" style="max-width: 500px; flex-direction: column;" @click.away="selectedRobotModal = null">
+            <div class="modal-header" style="padding: 20px 24px; border-bottom: 1px solid var(--card-border);">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 26px;" x-text="selectedRobotModal ? selectedRobotModal.icon : '🤖'"></span>
+                    <div>
+                        <h3 style="font-size: 16px; margin: 0;" x-text="selectedRobotModal ? selectedRobotModal.name : 'Robô'"></h3>
+                        <span style="font-size: 11px; color: var(--text-muted);" x-text="selectedRobotModal ? selectedRobotModal.dept : ''"></span>
+                    </div>
+                </div>
+                <button class="btn-close" @click="selectedRobotModal = null">✕</button>
+            </div>
+            <div style="padding: 24px; display: flex; flex-direction: column; gap: 14px;" x-show="selectedRobotModal">
+                <div style="background: rgba(0,0,0,0.35); border: 1px solid var(--card-border); padding: 14px 18px; border-radius: 10px;">
+                    <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">Status Operacional:</div>
+                    <div style="font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                        <span :style="{ color: selectedRobotModal && isServicePaused(selectedRobotModal.serviceKey) ? 'var(--danger)' : 'var(--success)' }">●</span>
+                        <span x-text="selectedRobotModal && isServicePaused(selectedRobotModal.serviceKey) ? 'PAUSADO NO CONTROLLER' : 'OPERANDO & PROCESSANDO'"></span>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">Atividade Atual:</div>
+                    <div style="font-size: 13px; color: var(--cyan); background: rgba(6, 182, 212, 0.08); padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(6, 182, 212, 0.2);" x-text="selectedRobotModal ? getRobotLiveTask(selectedRobotModal.serviceKey) : ''"></div>
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button class="btn" style="flex: 1;" @click="selectedRobotModal = null">Fechar</button>
+                    <button class="btn" style="flex: 1;" :class="selectedRobotModal && isServicePaused(selectedRobotModal.serviceKey) ? 'btn-primary' : 'btn-danger'"
+                            @click="toggleRobot(selectedRobotModal.serviceKey); selectedRobotModal = null"
+                            x-text="selectedRobotModal && isServicePaused(selectedRobotModal.serviceKey) ? '▶️ Retomar Robô' : '⏸️ Pausar Robô'"></button>
+                </div>
             </div>
         </div>
     </div>
@@ -943,6 +1140,12 @@
     <script>
         function dashboardApp() {
             return {
+                currentView: localStorage.getItem('autoclip_view') || 'both',
+                selectedRobotModal: null,
+                hoveredStation: null,
+                pixelOfficeCanvas: null,
+                pixelOfficeCtx: null,
+                pixelOfficeAnimId: null,
                 stats: {},
                 memory: {},
                 disk: {},
@@ -974,6 +1177,59 @@
                     'watchdog': 'Watchdog Guardião'
                 },
 
+                robotStations: [
+                    { id: 'radar_youtube', serviceKey: 'radar_youtube', name: 'Radar de Hype', dept: 'Inteligência & Mineração', icon: '📡', x: 60, y: 70, width: 160, height: 120, role: 'radar' },
+                    { id: 'robot1_ingest', serviceKey: 'robot1_ingest', name: 'Robô Ingestor', dept: 'Download & Pipeline', icon: '📥', x: 250, y: 70, width: 160, height: 120, role: 'ingest' },
+                    { id: 'whisper_transcriber', serviceKey: 'media_processor', name: 'Whisper Transcriber', dept: 'Áudio & Legendas', icon: '🎙️', x: 440, y: 70, width: 160, height: 120, role: 'audio' },
+                    { id: 'media_processor', serviceKey: 'media_processor', name: 'SupoClip AI (Llama 3.2)', dept: 'Diretoria de Cortes', icon: '🧠', x: 630, y: 70, width: 170, height: 120, role: 'ai' },
+                    { id: 'coffee_lounge', serviceKey: 'watchdog', name: 'Coffee Lounge & Pacing', dept: 'Sala de Descompressão', icon: '☕', x: 830, y: 70, width: 230, height: 120, role: 'lounge' },
+                    
+                    { id: 'smart_reframe', serviceKey: 'media_processor', name: 'Smart Reframe 9:16', dept: 'Enquadramento Vertical', icon: '📐', x: 60, y: 250, width: 160, height: 120, role: 'camera' },
+                    { id: 'llm_copywriter', serviceKey: 'llm_copywriter', name: 'Copywriter LLM', dept: 'Títulos & Copy Viral', icon: '✍️', x: 250, y: 250, width: 160, height: 120, role: 'writer' },
+                    { id: 'render_engine', serviceKey: 'media_processor', name: 'Fábrica FFmpeg', dept: 'Renderização de Vídeo', icon: '🎬', x: 440, y: 250, width: 160, height: 120, role: 'render' },
+                    { id: 'pub_yt_financas', serviceKey: 'pub_yt_financas', name: 'YouTube Shorts HQ', dept: 'Expedição YouTube', icon: '🔴', x: 630, y: 250, width: 170, height: 120, role: 'youtube' },
+                    { id: 'pub_tk_financas', serviceKey: 'pub_tk_financas', name: 'TikTok Dispatcher', dept: 'Expedição TikTok', icon: '⚫', x: 830, y: 250, width: 230, height: 120, role: 'tiktok' }
+                ],
+
+                get activeRobotsCount() {
+                    let count = 0;
+                    for (const key of Object.keys(this.serviceLabels)) {
+                        if (!this.isServicePaused(key)) count++;
+                    }
+                    return count;
+                },
+
+                setView(view) {
+                    this.currentView = view;
+                    localStorage.setItem('autoclip_view', view);
+                    if (view !== 'classic') {
+                        this.$nextTick(() => {
+                            this.initPixelOffice();
+                        });
+                    }
+                },
+
+                getRobotLiveTask(serviceKey) {
+                    if (this.isServicePaused(serviceKey)) return '💤 Robô pausado pelo operador (em espera).';
+                    const queue = this.stats.active_queue || 0;
+                    switch(serviceKey) {
+                        case 'radar_youtube':
+                            return '📡 Varrendo YouTube por vídeos de alto VPH nos 3 nichos.';
+                        case 'robot1_ingest':
+                            return queue > 0 ? `📥 Ingerindo pacote de vídeos brutos (${queue} pendentes).` : '📥 Fila de ingestão em dia, aguardando sinal do Radar.';
+                        case 'media_processor':
+                            return '🧠 SupoClip AI (Llama 3.2): Minerando pontos de retenção máxima e cortes 9:16.';
+                        case 'llm_copywriter':
+                            return '✍️ Gerando títulos magnéticos, roteiros de legenda e tags virais.';
+                        case 'pub_yt_financas':
+                            return `🔴 Despachando Shorts para os canais de Finanças e Notícias (${this.stats.today_youtube || 0} enviados hoje).`;
+                        case 'pub_tk_financas':
+                            return `⚫ Despachando vídeos no TikTok com respeito ao pacing (${this.stats.today_tiktok || 0} enviados hoje).`;
+                        default:
+                            return '⚡ Robô operando normalmente em background.';
+                    }
+                },
+
                 get ramColor() {
                     const p = this.memory.percent || 0;
                     return p < 75 ? 'var(--success)' : (p < 85 ? 'var(--warning)' : 'var(--danger)');
@@ -995,6 +1251,9 @@
                     this.loadChannels();
                     this.connectTelemetryWS();
                     this.connectLogsWS();
+                    this.$nextTick(() => {
+                        this.initPixelOffice();
+                    });
                 },
 
                 async loadClips() {
@@ -1168,27 +1427,352 @@
                 async submitAddChannel() {
                     if (!this.newChannel.identifier || !this.newChannel.identifier.trim()) {
                         alert('Informe o identificador (@handle, URL ou ID) do canal.');
-                        return;
-                    }
-                    this.channelLoading = true;
-                    try {
-                        const res = await fetch('/api/channels', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(this.newChannel)
-                        });
-                        const data = await res.json();
-                        if (res.ok && data.ok) {
-                            alert(`✅ Canal cadastrado com sucesso!`);
-                            this.closeChannelModal();
-                            this.loadChannels();
-                        } else {
-                            alert('❌ Erro ao adicionar canal: ' + (data.detail || data.error || 'Falha desconhecida'));
+                },
+
+                handleCanvasMouseMove(e) {
+                    const canvas = e.target;
+                    const rect = canvas.getBoundingClientRect();
+                    const scaleX = canvas.width / rect.width;
+                    const scaleY = canvas.height / rect.height;
+                    const mouseX = (e.clientX - rect.left) * scaleX;
+                    const mouseY = (e.clientY - rect.top) * scaleY;
+
+                    let found = null;
+                    for (const st of this.robotStations) {
+                        if (mouseX >= st.x && mouseX <= st.x + st.width && mouseY >= st.y && mouseY <= st.y + st.height) {
+                            found = st;
+                            break;
                         }
+                    }
+
+                    this.hoveredStation = found;
+                    canvas.style.cursor = found ? 'pointer' : 'default';
+                },
+
+                handleCanvasClick(e) {
+                    if (this.hoveredStation) {
+                        this.selectedRobotModal = this.hoveredStation;
+                    }
+                },
+
+                handleCanvasMouseLeave() {
+                    this.hoveredStation = null;
+                },
+
+                initPixelOffice() {
+                    try {
+                        const canvas = document.getElementById('pixelOfficeCanvas');
+                        if (!canvas) return;
+                        const ctx = canvas.getContext('2d');
+                        if (!ctx) return;
+
+                        if (this.pixelOfficeAnimId) {
+                            cancelAnimationFrame(this.pixelOfficeAnimId);
+                            this.pixelOfficeAnimId = null;
+                        }
+
+                        let tick = 0;
+                        let lastTime = performance.now();
+
+                        // Partículas de dados da esteira
+                        const dataParticles = [];
+                        for (let p = 0; p < 24; p++) {
+                            dataParticles.push({
+                                x: Math.random() * canvas.width,
+                                y: 50 + Math.random() * (canvas.height - 100),
+                                speed: 0.6 + Math.random() * 1.4,
+                                size: 1.5 + Math.random() * 2,
+                                color: Math.random() > 0.5 ? '#06b6d4' : '#6366f1'
+                            });
+                        }
+
+                        const render = (now) => {
+                            // Limita a ~30 FPS para poupar CPU/GPU
+                            if (now - lastTime < 32) {
+                                this.pixelOfficeAnimId = requestAnimationFrame(render);
+                                return;
+                            }
+                            lastTime = now;
+                            tick++;
+
+                            const W = canvas.width;
+                            const H = canvas.height;
+
+                            // 1. Fundo do Escritório (Piso Retro Dark Cyberpunk)
+                            ctx.fillStyle = '#070a12';
+                            ctx.fillRect(0, 0, W, H);
+
+                            // Grade quadriculada do chão
+                            ctx.strokeStyle = 'rgba(255, 255, 255, 0.025)';
+                            ctx.lineWidth = 1;
+                            const tileSize = 32;
+                            for (let x = 0; x < W; x += tileSize) {
+                                ctx.beginPath();
+                                ctx.moveTo(x, 0);
+                                ctx.lineTo(x, H);
+                                ctx.stroke();
+                            }
+                            for (let y = 0; y < H; y += tileSize) {
+                                ctx.beginPath();
+                                ctx.moveTo(0, y);
+                                ctx.lineTo(W, y);
+                                ctx.stroke();
+                            }
+
+                            // Parede superior com luzes de servidor
+                            ctx.fillStyle = '#0d121f';
+                            ctx.fillRect(0, 0, W, 48);
+                            ctx.strokeStyle = 'rgba(99, 102, 241, 0.2)';
+                            ctx.strokeRect(0, 0, W, 48);
+
+                            // Letreiro Superior do Escritório
+                            ctx.fillStyle = '#6366f1';
+                            ctx.font = 'bold 11px monospace';
+                            ctx.textAlign = 'left';
+                            ctx.fillText('⚡ AUTOCLIP VIRTUAL HQ • MULTI-AGENT STUDIO', 24, 28);
+
+                            // Status do Docker e Esteira no Topo
+                            ctx.fillStyle = '#10b981';
+                            ctx.fillText(`● DOCKER WORKER: LLAMA 3.2 ACTIVE | FILA: ${this.stats.active_queue || 0} | POSTADOS: ${(this.stats.today_youtube || 0) + (this.stats.today_tiktok || 0)}`, 440, 28);
+
+                            // Partículas de fluxo de dados
+                            dataParticles.forEach(pt => {
+                                pt.x += pt.speed;
+                                if (pt.x > W) pt.x = 0;
+                                ctx.fillStyle = pt.color;
+                                ctx.fillRect(pt.x, pt.y, pt.size, pt.size);
+                            });
+
+                            // 2. Renderização das Estações de Robôs
+                            this.robotStations.forEach(st => {
+                                const isHovered = this.hoveredStation && this.hoveredStation.id === st.id;
+                                const isPaused = this.isServicePaused(st.serviceKey);
+
+                                // Tapete / Área da mesa
+                                ctx.fillStyle = isHovered ? 'rgba(99, 102, 241, 0.18)' : 'rgba(255, 255, 255, 0.025)';
+                                ctx.fillRect(st.x - 10, st.y - 12, st.width + 20, st.height + 24);
+                                if (isHovered) {
+                                    ctx.strokeStyle = 'rgba(99, 102, 241, 0.6)';
+                                    ctx.lineWidth = 1.5;
+                                    ctx.strokeRect(st.x - 10, st.y - 12, st.width + 20, st.height + 24);
+                                }
+
+                                // Se for o Coffee Lounge
+                                if (st.role === 'lounge') {
+                                    // Sofá / Lounge
+                                    ctx.fillStyle = '#1e293b';
+                                    ctx.fillRect(st.x + 10, st.y + 20, 110, 48);
+                                    ctx.strokeStyle = '#334155';
+                                    ctx.strokeRect(st.x + 10, st.y + 20, 110, 48);
+
+                                    // Máquina de Café Expresso
+                                    ctx.fillStyle = '#0f172a';
+                                    ctx.fillRect(st.x + 140, st.y + 12, 42, 58);
+                                    ctx.fillStyle = '#ef4444';
+                                    ctx.fillRect(st.x + 148, st.y + 20, 6, 6);
+                                    ctx.fillStyle = (tick % 20 < 10) ? '#10b981' : '#059669';
+                                    ctx.fillRect(st.x + 162, st.y + 20, 6, 6);
+
+                                    // Vapor de café animado
+                                    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                                    const steamY = st.y + 10 - (tick % 16);
+                                    ctx.fillRect(st.x + 154, steamY, 2, 4);
+                                    ctx.fillRect(st.x + 158, steamY - 4, 3, 3);
+
+                                    // Placa do Lounge
+                                    ctx.fillStyle = '#94a3b8';
+                                    ctx.font = 'bold 10px monospace';
+                                    ctx.textAlign = 'center';
+                                    ctx.fillText('☕ COFFEE & PACING LOUNGE', st.x + st.width / 2, st.y + 100);
+                                    return;
+                                }
+
+                                // Mesa de Trabalho (Madeira escura e metal)
+                                ctx.fillStyle = '#1e2538';
+                                ctx.fillRect(st.x + 10, st.y + 36, st.width - 20, 40);
+                                ctx.strokeStyle = isPaused ? '#ef4444' : '#38466b';
+                                ctx.lineWidth = 1;
+                                ctx.strokeRect(st.x + 10, st.y + 36, st.width - 20, 40);
+
+                                // Monitor de Computador
+                                const monX = st.x + 28;
+                                const monY = st.y + 14;
+                                ctx.fillStyle = '#0f172a';
+                                ctx.fillRect(monX, monY, 44, 28);
+                                ctx.strokeStyle = '#475569';
+                                ctx.strokeRect(monX, monY, 44, 28);
+
+                                // Tela do Monitor (Piscando código se ativo)
+                                if (isPaused) {
+                                    ctx.fillStyle = '#1e1e24';
+                                    ctx.fillRect(monX + 3, monY + 3, 38, 22);
+                                    ctx.fillStyle = '#ef4444';
+                                    ctx.font = '8px monospace';
+                                    ctx.fillText('PAUSE', monX + 8, monY + 16);
+                                } else {
+                                    ctx.fillStyle = '#061325';
+                                    ctx.fillRect(monX + 3, monY + 3, 38, 22);
+                                    ctx.fillStyle = (st.role === 'youtube') ? '#f43f5e' : ((st.role === 'ai') ? '#a855f7' : '#06b6d4');
+                                    // Linhas de código animadas
+                                    const lineShift = (tick % 12);
+                                    ctx.fillRect(monX + 6, monY + 6 + (lineShift % 16), 18, 2);
+                                    ctx.fillRect(monX + 6, monY + 11, 26, 2);
+                                    ctx.fillRect(monX + 6, monY + 16, 12, 2);
+                                }
+
+                                // Suporte do monitor
+                                ctx.fillStyle = '#334155';
+                                ctx.fillRect(monX + 18, monY + 28, 8, 8);
+
+                                // Teclado
+                                ctx.fillStyle = '#334155';
+                                ctx.fillRect(monX + 6, monY + 40, 32, 8);
+
+                                // --- O ROBÔ PIXEL ---
+                                const botX = st.x + st.width - 56;
+                                const botY = st.y + 22;
+
+                                // Cadeira do robô
+                                ctx.fillStyle = '#111827';
+                                ctx.fillRect(botX - 4, botY + 18, 28, 30);
+
+                                // Corpo do robô
+                                ctx.fillStyle = isPaused ? '#475569' : '#3b82f6';
+                                ctx.fillRect(botX, botY + 12, 20, 22);
+
+                                // Cabeça do robô
+                                ctx.fillStyle = isPaused ? '#64748b' : '#93c5fd';
+                                ctx.fillRect(botX + 2, botY - 4, 16, 14);
+
+                                // Antena
+                                ctx.fillStyle = '#64748b';
+                                ctx.fillRect(botX + 9, botY - 10, 2, 6);
+                                // Luz da antena piscando
+                                ctx.fillStyle = isPaused ? '#ef4444' : ((tick % 16 < 8) ? '#10b981' : '#06b6d4');
+                                ctx.fillRect(botX + 8, botY - 12, 4, 3);
+
+                                // Olhos do robô
+                                if (isPaused) {
+                                    ctx.fillStyle = '#1e293b';
+                                    ctx.fillRect(botX + 5, botY, 3, 2);
+                                    ctx.fillRect(botX + 12, botY, 3, 2);
+                                } else {
+                                    const blink = (tick % 60 > 56);
+                                    ctx.fillStyle = blink ? '#1e3a8a' : '#0284c7';
+                                    ctx.fillRect(botX + 5, botY, 3, blink ? 1 : 4);
+                                    ctx.fillRect(botX + 12, botY, 3, blink ? 1 : 4);
+                                }
+
+                                // Braços digitando (Animação de frame alternado)
+                                ctx.fillStyle = isPaused ? '#475569' : '#60a5fa';
+                                const typeFrame = !isPaused && (tick % 8 < 4);
+                                ctx.fillRect(botX - 4, botY + 14 + (typeFrame ? 2 : 0), 6, 6);
+                                ctx.fillRect(botX - 8, botY + 22, 6, 4);
+
+                                // Detalhes especiais por tipo de robô
+                                if (st.role === 'radar') {
+                                    // Antena parabólica girando
+                                    ctx.strokeStyle = '#10b981';
+                                    ctx.beginPath();
+                                    ctx.arc(st.x + 18, st.y + 14, 10, 0, Math.PI);
+                                    ctx.stroke();
+                                    const radAngle = (tick * 0.1) % (Math.PI * 2);
+                                    ctx.beginPath();
+                                    ctx.moveTo(st.x + 18, st.y + 14);
+                                    ctx.lineTo(st.x + 18 + Math.cos(radAngle) * 9, st.y + 14 + Math.sin(radAngle) * 9);
+                                    ctx.stroke();
+                                } else if (st.role === 'ai') {
+                                    // Cérebro cibernético holográfico
+                                    ctx.fillStyle = (tick % 14 < 7) ? '#c084fc' : '#a855f7';
+                                    ctx.fillRect(st.x + 16, st.y + 6, 12, 8);
+                                    ctx.fillStyle = '#e879f9';
+                                    ctx.fillRect(st.x + 20, st.y + 4, 4, 3);
+                                } else if (st.role === 'youtube') {
+                                    // Selo vermelho do YouTube
+                                    ctx.fillStyle = '#ef4444';
+                                    ctx.fillRect(st.x + 12, st.y + 8, 14, 10);
+                                    ctx.fillStyle = '#ffffff';
+                                    ctx.beginPath();
+                                    ctx.moveTo(st.x + 16, st.y + 10);
+                                    ctx.lineTo(st.x + 16, st.y + 16);
+                                    ctx.lineTo(st.x + 22, st.y + 13);
+                                    ctx.fill();
+                                } else if (st.role === 'audio') {
+                                    // Fones de ouvido
+                                    ctx.fillStyle = '#ec4899';
+                                    ctx.fillRect(botX, botY - 1, 3, 8);
+                                    ctx.fillRect(botX + 17, botY - 1, 3, 8);
+                                    ctx.fillRect(botX + 2, botY - 5, 16, 2);
+                                }
+
+                                // Balão de Fala Pixelado (Speech Bubble)
+                                const bubbleX = st.x + 10;
+                                const bubbleY = st.y - 6;
+                                const bubbleW = st.width - 20;
+                                const bubbleH = 18;
+
+                                ctx.fillStyle = '#ffffff';
+                                ctx.fillRect(bubbleX, bubbleY, bubbleW, bubbleH);
+                                ctx.strokeStyle = '#000000';
+                                ctx.lineWidth = 1;
+                                ctx.strokeRect(bubbleX, bubbleY, bubbleW, bubbleH);
+
+                                // Ponta do balão
+                                ctx.beginPath();
+                                ctx.moveTo(bubbleX + bubbleW - 24, bubbleY + bubbleH);
+                                ctx.lineTo(bubbleX + bubbleW - 18, bubbleY + bubbleH + 4);
+                                ctx.lineTo(bubbleX + bubbleW - 12, bubbleY + bubbleH);
+                                ctx.fillStyle = '#ffffff';
+                                ctx.fill();
+
+                                // Texto do Balão
+                                ctx.fillStyle = isPaused ? '#ef4444' : '#0f172a';
+                                ctx.font = 'bold 8.5px monospace';
+                                ctx.textAlign = 'center';
+
+                                let bubbleText = '● OPERANDO';
+                                if (isPaused) {
+                                    bubbleText = '💤 PAUSADO';
+                                } else if (st.role === 'radar') {
+                                    bubbleText = '📡 VARRENDO VPH';
+                                } else if (st.role === 'ingest') {
+                                    bubbleText = '📥 INGERINDO';
+                                } else if (st.role === 'audio') {
+                                    bubbleText = '🎙️ LEGENDAS';
+                                } else if (st.role === 'ai') {
+                                    bubbleText = '🧠 LLAMA-3.2';
+                                } else if (st.role === 'camera') {
+                                    bubbleText = '📐 REFRAME 9:16';
+                                } else if (st.role === 'writer') {
+                                    bubbleText = '✍️ COPYWRITER';
+                                } else if (st.role === 'render') {
+                                    bubbleText = '🎬 FFMPEG MP4';
+                                } else if (st.role === 'youtube') {
+                                    bubbleText = '🔴 YOUTUBE SHORTS';
+                                } else if (st.role === 'tiktok') {
+                                    bubbleText = '⚫ TIKTOK DISPATCH';
+                                }
+
+                                ctx.fillText(bubbleText, bubbleX + bubbleW / 2, bubbleY + 12);
+
+                                // Placa com Nome da Estação
+                                ctx.fillStyle = '#0b0f19';
+                                ctx.fillRect(st.x + 8, st.y + 82, st.width - 16, 16);
+                                ctx.strokeStyle = isHovered ? '#6366f1' : 'rgba(255, 255, 255, 0.1)';
+                                ctx.strokeRect(st.x + 8, st.y + 82, st.width - 16, 16);
+
+                                ctx.fillStyle = isHovered ? '#ffffff' : '#94a3b8';
+                                ctx.font = 'bold 9px monospace';
+                                ctx.textAlign = 'center';
+                                ctx.fillText(st.name.toUpperCase(), st.x + st.width / 2, st.y + 93);
+                            });
+
+                            this.pixelOfficeAnimId = requestAnimationFrame(render);
+                        };
+
+                        this.pixelOfficeAnimId = requestAnimationFrame(render);
                     } catch (err) {
-                        alert('❌ Erro de conexão: ' + err);
-                    } finally {
-                        this.channelLoading = false;
+                        console.warn("Aviso ao inicializar Pixel Office Canvas:", err);
                     }
                 }
             };

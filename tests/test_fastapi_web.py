@@ -22,13 +22,17 @@ def setup_controls():
     PipelineController.resume_all()
 
 def test_home_page_returns_html(client):
-    """Garante que a rota raiz entrega o template com Alpine.js e HTMX."""
+    """Garante que a rota raiz entrega o template com Alpine.js, HTMX e Pixel Office HQ."""
     response = client.get("/")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "Centro de Controle • AutoClip Pipeline" in response.text
     assert "alpinejs" in response.text
     assert "htmx.org" in response.text
+    assert "pixelOfficeCanvas" in response.text
+    assert "Pixel Office HQ" in response.text
+    assert "selectedRobotModal" in response.text
+    assert "view-toggle" in response.text
 
 def test_robots_api_endpoints(client):
     """Testa status e alternância de pausa de robôs."""
