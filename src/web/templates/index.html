@@ -1531,6 +1531,69 @@
                             this.pixelAssets.cat.src = '/static/pixel-agents/pets/gitcat/pet.png';
                         }
 
+                        // Inicialização dos Agentes Autônomos com Estados e Movimento
+                        const hallY = 205; // Corredor central para circulação
+                        const coffeeX = 890;
+                        const coffeeY = 100;
+
+                        if (!this.pixelOfficeAgents) {
+                            this.pixelOfficeAgents = this.robotStations
+                                .filter(st => st.role !== 'lounge')
+                                .map((st, idx) => {
+                                    const hX = st.x + st.width - 56;
+                                    const hY = st.y + 18;
+                                    return {
+                                        stId: st.id,
+                                        st: st,
+                                        charIndex: idx % 6,
+                                        homeX: hX,
+                                        homeY: hY,
+                                        x: hX,
+                                        y: hY,
+                                        state: 'WORKING', // WORKING, WALK_TO_COFFEE, AT_COFFEE, WALK_TO_DESK, PAUSED
+                                        dir: 'down',
+                                        walkFrame: 0,
+                                        coffeeTimer: 0,
+                                        coffeeCooldown: 250 + Math.floor(Math.random() * 500)
+                                    };
+                                });
+
+                            // Entregador Mensageiro (Data Courier entre setores)
+                            this.pixelOfficeCourier = {
+                                charIndex: 3,
+                                x: 140,
+                                y: hallY,
+                                targetWpIdx: 0,
+                                waitTimer: 0,
+                                dir: 'right',
+                                walkFrame: 0,
+                                waypoints: [
+                                    { x: 140, y: hallY, label: 'RADAR 📡' },
+                                    { x: 330, y: hallY, label: 'INGESTOR 📥' },
+                                    { x: 520, y: hallY, label: 'WHISPER 🎙️' },
+                                    { x: 710, y: hallY, label: 'LLAMA 🧠' },
+                                    { x: 920, y: hallY, label: 'LOUNGE ☕' },
+                                    { x: 890, y: 380, label: 'TIKTOK ⚫' },
+                                    { x: 710, y: 380, label: 'YOUTUBE 🔴' },
+                                    { x: 520, y: 380, label: 'FFMPEG 🎬' },
+                                    { x: 330, y: 380, label: 'COPY ✍️' },
+                                    { x: 140, y: 380, label: 'REFRAME 📐' }
+                                ]
+                            };
+
+                            // Gatinho Mascote Autônomo
+                            this.pixelOfficeCat = {
+                                x: 880,
+                                y: 105,
+                                targetX: 880,
+                                targetY: 105,
+                                state: 'SITTING', // SITTING, WALKING, NAPPING
+                                dir: 'left',
+                                walkFrame: 0,
+                                timer: 90
+                            };
+                        }
+
                         // Partículas de dados da esteira
                         const dataParticles = [];
                         for (let p = 0; p < 24; p++) {
@@ -1542,6 +1605,42 @@
                                 color: Math.random() > 0.5 ? '#06b6d4' : '#6366f1'
                             });
                         }
+
+                        // Função auxiliar de desenho com Walk Cycle e Espelhamento
+                        const drawSpriteAgent = (charSprite, x, y, dir, action, frame) => {
+                            if (!charSprite || !charSprite.complete || charSprite.naturalWidth === 0) return false;
+                            let row = 0; // 0 = down, 1 = up, 2 = side
+                            if (dir === 'up') row = 1;
+                            else if (dir === 'right' || dir === 'left') row = 2;
+
+                            let col = 0;
+                            if (action === 'walk') {
+                                col = 1 + (Math.floor(frame) % 4);
+                            } else if (action === 'type') {
+                                col = (dir === 'down') ? 5 : (5 + (Math.floor(frame) % 2));
+                            } else if (action === 'read') {
+                                col = 6;
+                            } else {
+                                col = 0; // idle
+                            }
+
+                            // Sombra suave sob os pés
+                            ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                            ctx.beginPath();
+                            ctx.ellipse(x + 14, y + 56, 11, 4, 0, 0, Math.PI * 2);
+                            ctx.fill();
+
+                            if (dir === 'left') {
+                                ctx.save();
+                                ctx.translate(x + 28, y);
+                                ctx.scale(-1, 1);
+                                ctx.drawImage(charSprite, col * 16, row * 32, 16, 32, 0, 0, 28, 58);
+                                ctx.restore();
+                            } else {
+                                ctx.drawImage(charSprite, col * 16, row * 32, 16, 32, x, y, 28, 58);
+                            }
+                            return true;
+                        };
 
                         const render = (now) => {
                             // Limita a ~30 FPS para poupar CPU/GPU
@@ -1576,6 +1675,10 @@
                                 ctx.stroke();
                             }
 
+                            // Corredor central sutilmente iluminado
+                            ctx.fillStyle = 'rgba(99, 102, 241, 0.03)';
+                            ctx.fillRect(40, hallY - 14, W - 80, 48);
+
                             // Parede superior com luzes de servidor
                             ctx.fillStyle = '#0d121f';
                             ctx.fillRect(0, 0, W, 48);
@@ -1600,7 +1703,7 @@
                                 ctx.fillRect(pt.x, pt.y, pt.size, pt.size);
                             });
 
-                            // 2. Renderização das Estações de Robôs
+                            // 2. Renderização das Estações Fixas (Mobiliário, Computadores, Sofá)
                             this.robotStations.forEach(st => {
                                 const isHovered = this.hoveredStation && this.hoveredStation.id === st.id;
                                 const isPaused = this.isServicePaused(st.serviceKey);
@@ -1616,7 +1719,6 @@
 
                                 // Se for o Coffee Lounge
                                 if (st.role === 'lounge') {
-                                    // Sofá / Lounge Oficial do Pixel Agents
                                     if (this.pixelAssets && this.pixelAssets.sofa.complete && this.pixelAssets.sofa.naturalWidth > 0) {
                                         ctx.drawImage(this.pixelAssets.sofa, st.x + 10, st.y + 16, 110, 52);
                                     } else {
@@ -1636,12 +1738,6 @@
                                         ctx.fillRect(st.x + 148, st.y + 20, 6, 6);
                                         ctx.fillStyle = (tick % 20 < 10) ? '#10b981' : '#059669';
                                         ctx.fillRect(st.x + 162, st.y + 20, 6, 6);
-                                    }
-
-                                    // Gatinho Mascote do Escritório (Pixel Agents Pet)
-                                    if (this.pixelAssets && this.pixelAssets.cat.complete && this.pixelAssets.cat.naturalWidth > 0) {
-                                        const petFrame = (tick % 30 < 15 ? 0 : 16);
-                                        ctx.drawImage(this.pixelAssets.cat, petFrame, 0, 16, 16, st.x + 50, st.y + 36, 28, 28);
                                     }
 
                                     // Vapor de café animado
@@ -1669,7 +1765,7 @@
                                     ctx.strokeRect(st.x + 10, st.y + 36, st.width - 20, 40);
                                 }
 
-                                // Monitor de Computador Oficial do Pixel Agents
+                                // Monitor de Computador Oficial
                                 const monX = st.x + 24;
                                 const monY = st.y + 12;
                                 const pcImg = isPaused ? this.pixelAssets.pcOff : ((tick % 16 < 8) ? this.pixelAssets.pc1 : this.pixelAssets.pc2);
@@ -1681,71 +1777,10 @@
                                     ctx.fillRect(monX, monY, 44, 28);
                                     ctx.strokeStyle = '#475569';
                                     ctx.strokeRect(monX, monY, 44, 28);
-
-                                    if (isPaused) {
-                                        ctx.fillStyle = '#1e1e24';
-                                        ctx.fillRect(monX + 3, monY + 3, 38, 22);
-                                        ctx.fillStyle = '#ef4444';
-                                        ctx.font = '8px monospace';
-                                        ctx.fillText('PAUSE', monX + 8, monY + 16);
-                                    } else {
-                                        ctx.fillStyle = '#061325';
-                                        ctx.fillRect(monX + 3, monY + 3, 38, 22);
-                                        ctx.fillStyle = (st.role === 'youtube') ? '#f43f5e' : ((st.role === 'ai') ? '#a855f7' : '#06b6d4');
-                                        const lineShift = (tick % 12);
-                                        ctx.fillRect(monX + 6, monY + 6 + (lineShift % 16), 18, 2);
-                                        ctx.fillRect(monX + 6, monY + 11, 26, 2);
-                                        ctx.fillRect(monX + 6, monY + 16, 12, 2);
-                                    }
-                                }
-
-                                // --- PERSONAGEM OFICIAL DO PIXEL AGENTS ---
-                                const botX = st.x + st.width - 56;
-                                const botY = st.y + 18;
-                                const charIndex = this.robotStations.indexOf(st) % 6;
-                                const charSprite = this.pixelAssets && this.pixelAssets.chars[charIndex];
-
-                                if (charSprite && charSprite.complete && charSprite.naturalWidth > 0) {
-                                    // Spritesheet oficial: 112x96 (3 linhas x 7 frames de 16x32)
-                                    // Linha 0 (sy = 0) = Direção DOWN / Frente
-                                    // Frame 0 (sx = 0) = Idle / Sentado
-                                    // Frames 5 e 6 (sx = 80 e 96) = Digitação no teclado (Typing animation)
-                                    const sx = isPaused ? 0 : ((tick % 12 < 6) ? 80 : 96);
-                                    const sy = 0;
-                                    ctx.drawImage(charSprite, sx, sy, 16, 32, botX - 4, botY - 8, 30, 60);
-                                } else {
-                                    // Fallback geométrico robô
-                                    ctx.fillStyle = '#111827';
-                                    ctx.fillRect(botX - 4, botY + 18, 28, 30);
-                                    ctx.fillStyle = isPaused ? '#475569' : '#3b82f6';
-                                    ctx.fillRect(botX, botY + 12, 20, 22);
-                                    ctx.fillStyle = isPaused ? '#64748b' : '#93c5fd';
-                                    ctx.fillRect(botX + 2, botY - 4, 16, 14);
-                                    ctx.fillStyle = '#64748b';
-                                    ctx.fillRect(botX + 9, botY - 10, 2, 6);
-                                    ctx.fillStyle = isPaused ? '#ef4444' : ((tick % 16 < 8) ? '#10b981' : '#06b6d4');
-                                    ctx.fillRect(botX + 8, botY - 12, 4, 3);
-
-                                    if (isPaused) {
-                                        ctx.fillStyle = '#1e293b';
-                                        ctx.fillRect(botX + 5, botY, 3, 2);
-                                        ctx.fillRect(botX + 12, botY, 3, 2);
-                                    } else {
-                                        const blink = (tick % 60 > 56);
-                                        ctx.fillStyle = blink ? '#1e3a8a' : '#0284c7';
-                                        ctx.fillRect(botX + 5, botY, 3, blink ? 1 : 4);
-                                        ctx.fillRect(botX + 12, botY, 3, blink ? 1 : 4);
-                                    }
-
-                                    ctx.fillStyle = isPaused ? '#475569' : '#60a5fa';
-                                    const typeFrame = !isPaused && (tick % 8 < 4);
-                                    ctx.fillRect(botX - 4, botY + 14 + (typeFrame ? 2 : 0), 6, 6);
-                                    ctx.fillRect(botX - 8, botY + 22, 6, 4);
                                 }
 
                                 // Detalhes especiais por tipo de robô
                                 if (st.role === 'radar') {
-                                    // Antena parabólica girando
                                     ctx.strokeStyle = '#10b981';
                                     ctx.beginPath();
                                     ctx.arc(st.x + 18, st.y + 14, 10, 0, Math.PI);
@@ -1756,13 +1791,11 @@
                                     ctx.lineTo(st.x + 18 + Math.cos(radAngle) * 9, st.y + 14 + Math.sin(radAngle) * 9);
                                     ctx.stroke();
                                 } else if (st.role === 'ai') {
-                                    // Cérebro cibernético holográfico
                                     ctx.fillStyle = (tick % 14 < 7) ? '#c084fc' : '#a855f7';
                                     ctx.fillRect(st.x + 16, st.y + 6, 12, 8);
                                     ctx.fillStyle = '#e879f9';
                                     ctx.fillRect(st.x + 20, st.y + 4, 4, 3);
                                 } else if (st.role === 'youtube') {
-                                    // Selo vermelho do YouTube
                                     ctx.fillStyle = '#ef4444';
                                     ctx.fillRect(st.x + 12, st.y + 8, 14, 10);
                                     ctx.fillStyle = '#ffffff';
@@ -1771,63 +1804,7 @@
                                     ctx.lineTo(st.x + 16, st.y + 16);
                                     ctx.lineTo(st.x + 22, st.y + 13);
                                     ctx.fill();
-                                } else if (st.role === 'audio') {
-                                    // Fones de ouvido
-                                    ctx.fillStyle = '#ec4899';
-                                    ctx.fillRect(botX, botY - 1, 3, 8);
-                                    ctx.fillRect(botX + 17, botY - 1, 3, 8);
-                                    ctx.fillRect(botX + 2, botY - 5, 16, 2);
                                 }
-
-                                // Balão de Fala Pixelado (Speech Bubble)
-                                const bubbleX = st.x + 10;
-                                const bubbleY = st.y - 6;
-                                const bubbleW = st.width - 20;
-                                const bubbleH = 18;
-
-                                ctx.fillStyle = '#ffffff';
-                                ctx.fillRect(bubbleX, bubbleY, bubbleW, bubbleH);
-                                ctx.strokeStyle = '#000000';
-                                ctx.lineWidth = 1;
-                                ctx.strokeRect(bubbleX, bubbleY, bubbleW, bubbleH);
-
-                                // Ponta do balão
-                                ctx.beginPath();
-                                ctx.moveTo(bubbleX + bubbleW - 24, bubbleY + bubbleH);
-                                ctx.lineTo(bubbleX + bubbleW - 18, bubbleY + bubbleH + 4);
-                                ctx.lineTo(bubbleX + bubbleW - 12, bubbleY + bubbleH);
-                                ctx.fillStyle = '#ffffff';
-                                ctx.fill();
-
-                                // Texto do Balão
-                                ctx.fillStyle = isPaused ? '#ef4444' : '#0f172a';
-                                ctx.font = 'bold 8.5px monospace';
-                                ctx.textAlign = 'center';
-
-                                let bubbleText = '● OPERANDO';
-                                if (isPaused) {
-                                    bubbleText = '💤 PAUSADO';
-                                } else if (st.role === 'radar') {
-                                    bubbleText = '📡 VARRENDO VPH';
-                                } else if (st.role === 'ingest') {
-                                    bubbleText = '📥 INGERINDO';
-                                } else if (st.role === 'audio') {
-                                    bubbleText = '🎙️ LEGENDAS';
-                                } else if (st.role === 'ai') {
-                                    bubbleText = '🧠 LLAMA-3.2';
-                                } else if (st.role === 'camera') {
-                                    bubbleText = '📐 REFRAME 9:16';
-                                } else if (st.role === 'writer') {
-                                    bubbleText = '✍️ COPYWRITER';
-                                } else if (st.role === 'render') {
-                                    bubbleText = '🎬 FFMPEG MP4';
-                                } else if (st.role === 'youtube') {
-                                    bubbleText = '🔴 YOUTUBE SHORTS';
-                                } else if (st.role === 'tiktok') {
-                                    bubbleText = '⚫ TIKTOK DISPATCH';
-                                }
-
-                                ctx.fillText(bubbleText, bubbleX + bubbleW / 2, bubbleY + 12);
 
                                 // Placa com Nome da Estação
                                 ctx.fillStyle = '#0b0f19';
@@ -1841,8 +1818,243 @@
                                 ctx.fillText(st.name.toUpperCase(), st.x + st.width / 2, st.y + 93);
                             });
 
+                            // 3. Atualização e Desenho dos Agentes Autônomos (Caminhada e Ações)
+                            if (this.pixelOfficeAgents) {
+                                this.pixelOfficeAgents.forEach(agent => {
+                                    const isPaused = this.isServicePaused(agent.st.serviceKey);
+                                    const charSprite = this.pixelAssets && this.pixelAssets.chars[agent.charIndex];
+                                    const moveSpeed = 1.6;
+
+                                    if (isPaused) {
+                                        agent.state = 'PAUSED';
+                                    } else if (agent.state === 'PAUSED') {
+                                        agent.state = 'WORKING';
+                                    }
+
+                                    // Lógica de Estados
+                                    if (agent.state === 'WORKING') {
+                                        agent.x = agent.homeX;
+                                        agent.y = agent.homeY;
+                                        agent.dir = 'down';
+
+                                        // Contagem para pausa do café
+                                        agent.coffeeCooldown--;
+                                        if (agent.coffeeCooldown <= 0) {
+                                            const anyoneAtCoffee = this.pixelOfficeAgents.some(a => a.state === 'AT_COFFEE' || a.state === 'WALK_TO_COFFEE');
+                                            if (!anyoneAtCoffee) {
+                                                agent.state = 'WALK_TO_COFFEE';
+                                            } else {
+                                                agent.coffeeCooldown = 150;
+                                            }
+                                        }
+
+                                        // Desenho trabalhando na mesa
+                                        const actionType = (tick % 60 < 40) ? 'type' : 'read';
+                                        drawSpriteAgent(charSprite, agent.x, agent.y, 'down', actionType, tick * 0.15);
+
+                                    } else if (agent.state === 'WALK_TO_COFFEE') {
+                                        // Fase 1: Ir até o corredor hallY
+                                        if (Math.abs(agent.y - hallY) > 2) {
+                                            agent.dir = (agent.y < hallY) ? 'down' : 'up';
+                                            agent.y += (agent.dir === 'down' ? moveSpeed : -moveSpeed);
+                                            agent.walkFrame += 0.2;
+                                        }
+                                        // Fase 2: Andar pelo corredor até coffeeX
+                                        else if (Math.abs(agent.x - coffeeX) > 2) {
+                                            agent.y = hallY;
+                                            agent.dir = (agent.x < coffeeX) ? 'right' : 'left';
+                                            agent.x += (agent.dir === 'right' ? moveSpeed : -moveSpeed);
+                                            agent.walkFrame += 0.2;
+                                        }
+                                        // Fase 3: Subir até a máquina de café
+                                        else if (Math.abs(agent.y - coffeeY) > 2) {
+                                            agent.dir = 'up';
+                                            agent.y -= moveSpeed;
+                                            agent.walkFrame += 0.2;
+                                        } else {
+                                            agent.state = 'AT_COFFEE';
+                                            agent.coffeeTimer = 180; // ~6 segundos no café
+                                            agent.dir = 'down';
+                                        }
+                                        drawSpriteAgent(charSprite, agent.x, agent.y, agent.dir, 'walk', agent.walkFrame);
+
+                                    } else if (agent.state === 'AT_COFFEE') {
+                                        agent.coffeeTimer--;
+                                        agent.dir = 'down';
+                                        if (agent.coffeeTimer <= 0) {
+                                            agent.state = 'WALK_TO_DESK';
+                                        }
+                                        // Segura copo de café
+                                        drawSpriteAgent(charSprite, agent.x, agent.y, 'down', 'idle', 0);
+                                        // Emote do Café acima da cabeça
+                                        ctx.fillStyle = '#f59e0b';
+                                        ctx.font = 'bold 12px sans-serif';
+                                        ctx.fillText('☕', agent.x + 8, agent.y - 8);
+
+                                    } else if (agent.state === 'WALK_TO_DESK') {
+                                        // Fase 1: Descer do lounge até hallY
+                                        if (Math.abs(agent.y - hallY) > 2 && agent.x > coffeeX - 20) {
+                                            agent.dir = 'down';
+                                            agent.y += moveSpeed;
+                                            agent.walkFrame += 0.2;
+                                        }
+                                        // Fase 2: Andar pelo corredor até a coluna homeX da mesa
+                                        else if (Math.abs(agent.x - agent.homeX) > 2) {
+                                            agent.y = hallY;
+                                            agent.dir = (agent.x < agent.homeX) ? 'right' : 'left';
+                                            agent.x += (agent.dir === 'right' ? moveSpeed : -moveSpeed);
+                                            agent.walkFrame += 0.2;
+                                        }
+                                        // Fase 3: Ir até a mesa homeY
+                                        else if (Math.abs(agent.y - agent.homeY) > 2) {
+                                            agent.dir = (agent.y < agent.homeY) ? 'down' : 'up';
+                                            agent.y += (agent.dir === 'down' ? moveSpeed : -moveSpeed);
+                                            agent.walkFrame += 0.2;
+                                        } else {
+                                            agent.x = agent.homeX;
+                                            agent.y = agent.homeY;
+                                            agent.state = 'WORKING';
+                                            agent.coffeeCooldown = 500 + Math.floor(Math.random() * 600);
+                                        }
+                                        drawSpriteAgent(charSprite, agent.x, agent.y, agent.dir, 'walk', agent.walkFrame);
+
+                                    } else if (agent.state === 'PAUSED') {
+                                        // Modo soneca na cadeira
+                                        drawSpriteAgent(charSprite, agent.homeX, agent.homeY, 'down', 'idle', 0);
+                                        // Bolha Zzz animada
+                                        const zShift = (tick % 40);
+                                        ctx.fillStyle = 'rgba(148, 163, 184, 0.8)';
+                                        ctx.font = 'bold 10px monospace';
+                                        ctx.fillText('z', agent.homeX + 18 + Math.sin(zShift * 0.2) * 4, agent.homeY - 6 - (zShift * 0.4));
+                                        ctx.font = 'bold 12px monospace';
+                                        ctx.fillText('Z', agent.homeX + 24 + Math.sin(zShift * 0.2) * 6, agent.homeY - 14 - (zShift * 0.5));
+                                    }
+
+                                    // Balão de fala acompanhando a posição do agente
+                                    const bubbleX = (agent.state === 'WORKING' || agent.state === 'PAUSED') ? (agent.st.x + 10) : (agent.x - 20);
+                                    const bubbleY = (agent.state === 'WORKING' || agent.state === 'PAUSED') ? (agent.st.y - 6) : (agent.y - 18);
+                                    const bubbleW = (agent.state === 'WORKING' || agent.state === 'PAUSED') ? (agent.st.width - 20) : 74;
+                                    const bubbleH = 18;
+
+                                    ctx.fillStyle = '#ffffff';
+                                    ctx.fillRect(bubbleX, bubbleY, bubbleW, bubbleH);
+                                    ctx.strokeStyle = '#000000';
+                                    ctx.lineWidth = 1;
+                                    ctx.strokeRect(bubbleX, bubbleY, bubbleW, bubbleH);
+
+                                    ctx.fillStyle = isPaused ? '#ef4444' : '#0f172a';
+                                    ctx.font = 'bold 8.5px monospace';
+                                    ctx.textAlign = 'center';
+
+                                    let bubbleText = '● OPERANDO';
+                                    if (isPaused) {
+                                        bubbleText = '💤 PAUSADO';
+                                    } else if (agent.state === 'AT_COFFEE' || agent.state === 'WALK_TO_COFFEE') {
+                                        bubbleText = '☕ CAFÉ & PAUSA';
+                                    } else if (agent.st.role === 'radar') {
+                                        bubbleText = '📡 VARRENDO VPH';
+                                    } else if (agent.st.role === 'ingest') {
+                                        bubbleText = '📥 INGERINDO';
+                                    } else if (agent.st.role === 'audio') {
+                                        bubbleText = '🎙️ LEGENDAS';
+                                    } else if (agent.st.role === 'ai') {
+                                        bubbleText = '🧠 LLAMA-3.2';
+                                    } else if (agent.st.role === 'camera') {
+                                        bubbleText = '📐 REFRAME 9:16';
+                                    } else if (agent.st.role === 'writer') {
+                                        bubbleText = '✍️ COPYWRITER';
+                                    } else if (agent.st.role === 'render') {
+                                        bubbleText = '🎬 FFMPEG MP4';
+                                    } else if (agent.st.role === 'youtube') {
+                                        bubbleText = '🔴 YOUTUBE';
+                                    } else if (agent.st.role === 'tiktok') {
+                                        bubbleText = '⚫ TIKTOK';
+                                    }
+                                    ctx.fillText(bubbleText, bubbleX + bubbleW / 2, bubbleY + 12);
+                                });
+                            }
+
+                            // 4. Entregador de Dados / Estagiário (Data Courier Autônomo)
+                            if (this.pixelOfficeCourier) {
+                                const cr = this.pixelOfficeCourier;
+                                const wp = cr.waypoints[cr.targetWpIdx];
+                                const crSpeed = 2.0;
+                                const charCourierSprite = this.pixelAssets && this.pixelAssets.chars[cr.charIndex];
+
+                                if (cr.waitTimer > 0) {
+                                    cr.waitTimer--;
+                                    drawSpriteAgent(charCourierSprite, cr.x, cr.y, cr.dir, 'read', tick * 0.2);
+                                    // Pacote brilhante sendo entregue
+                                    ctx.fillStyle = '#38bdf8';
+                                    ctx.font = 'bold 11px sans-serif';
+                                    ctx.fillText('📦', cr.x + 8, cr.y - 8);
+                                } else {
+                                    const dx = wp.x - cr.x;
+                                    const dy = wp.y - cr.y;
+                                    const dist = Math.hypot(dx, dy);
+
+                                    if (dist < 3) {
+                                        cr.x = wp.x;
+                                        cr.y = wp.y;
+                                        cr.waitTimer = 35; // pausa para entregar documento
+                                        cr.targetWpIdx = (cr.targetWpIdx + 1) % cr.waypoints.length;
+                                    } else {
+                                        cr.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
+                                        cr.x += (dx / dist) * crSpeed;
+                                        cr.y += (dy / dist) * crSpeed;
+                                        cr.walkFrame += 0.22;
+                                    }
+                                    drawSpriteAgent(charCourierSprite, cr.x, cr.y, cr.dir, 'walk', cr.walkFrame);
+                                }
+                            }
+
+                            // 5. Gatinho Mascote Passeando (Roaming Pet Cat)
+                            if (this.pixelOfficeCat && this.pixelAssets && this.pixelAssets.cat.complete && this.pixelAssets.cat.naturalWidth > 0) {
+                                const cat = this.pixelOfficeCat;
+                                cat.timer--;
+
+                                if (cat.state === 'WALKING') {
+                                    const dx = cat.targetX - cat.x;
+                                    const dy = cat.targetY - cat.y;
+                                    const dist = Math.hypot(dx, dy);
+
+                                    if (dist < 2 || cat.timer <= 0) {
+                                        cat.x = cat.targetX;
+                                        cat.y = cat.targetY;
+                                        cat.state = (Math.random() > 0.5) ? 'NAPPING' : 'SITTING';
+                                        cat.timer = 120 + Math.floor(Math.random() * 150);
+                                    } else {
+                                        cat.dir = dx >= 0 ? 'right' : 'left';
+                                        cat.x += (dx / dist) * 1.0;
+                                        cat.y += (dy / dist) * 1.0;
+                                        cat.walkFrame += 0.15;
+                                    }
+                                    const catCol = Math.floor(cat.walkFrame) % 3;
+                                    ctx.drawImage(this.pixelAssets.cat, catCol * 32, 32, 32, 32, cat.x, cat.y, 28, 28);
+                                } else {
+                                    if (cat.timer <= 0) {
+                                        cat.state = 'WALKING';
+                                        cat.targetX = 840 + Math.random() * 180;
+                                        cat.targetY = 75 + Math.random() * 80;
+                                        cat.timer = 140;
+                                    }
+                                    // Soneca / Sentado
+                                    const catRow = (cat.state === 'NAPPING') ? 0 : 64;
+                                    const catCol = (tick % 40 < 20) ? 0 : 32;
+                                    ctx.drawImage(this.pixelAssets.cat, catCol, catRow, 32, 32, cat.x, cat.y, 28, 28);
+
+                                    if (cat.state === 'NAPPING' && tick % 30 < 15) {
+                                        ctx.fillStyle = '#a78bfa';
+                                        ctx.font = 'bold 9px monospace';
+                                        ctx.fillText('z', cat.x + 22, cat.y + 4);
+                                    }
+                                }
+                            }
+
                             this.pixelOfficeAnimId = requestAnimationFrame(render);
                         };
+
+                        this.pixelOfficeAnimId = requestAnimationFrame(render);
 
                         this.pixelOfficeAnimId = requestAnimationFrame(render);
                     } catch (err) {
