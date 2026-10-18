@@ -85,19 +85,6 @@ def fetch_channel_feed(rss_url: str, channel_ref: Optional[str] = None) -> List[
             import sys
             import json
 
-            cmd = [
-                sys.executable,
-                "-m",
-                "yt_dlp",
-                "--flat-playlist",
-                "--dump-single-json",
-                "--playlist-items",
-                "1:20",
-                "--no-warnings",
-                "--js-runtimes",
-                "node",
-            ]
-            # Injeta cookies se disponíveis
             config_dir = Path("./config")
             cookie_candidates = [
                 config_dir / "cookies_fitness.txt",
@@ -105,12 +92,31 @@ def fetch_channel_feed(rss_url: str, channel_ref: Optional[str] = None) -> List[
                 Path(settings.YTDLP_COOKIES_PATH),
             ]
             valid_cookies = [c for c in cookie_candidates if c.exists() and c.stat().st_size > 0]
-            if valid_cookies:
-                freshest_cookie = max(valid_cookies, key=lambda c: c.stat().st_mtime)
-                cmd.extend(["--cookies", str(freshest_cookie)])
+            freshest_cookie = max(valid_cookies, key=lambda c: c.stat().st_mtime) if valid_cookies else None
 
-            cmd.append(channel_url)
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            def _run_channel(use_cookies: bool = False):
+                base_cmd = [
+                    sys.executable,
+                    "-m",
+                    "yt_dlp",
+                    "--flat-playlist",
+                    "--dump-single-json",
+                    "--playlist-items",
+                    "1:20",
+                    "--no-warnings",
+                    "--js-runtimes",
+                    "node",
+                    "--remote-components",
+                    "ejs:github",
+                ]
+                if use_cookies and freshest_cookie:
+                    base_cmd.extend(["--cookies", str(freshest_cookie)])
+                base_cmd.append(channel_url)
+                return subprocess.run(base_cmd, capture_output=True, text=True, timeout=30)
+
+            res = _run_channel(use_cookies=False)
+            if res.returncode != 0 and freshest_cookie:
+                res = _run_channel(use_cookies=True)
             if res.returncode == 0 and res.stdout.strip():
                 data = json.loads(res.stdout)
                 fallback_entries = []

@@ -5,6 +5,7 @@ Serviço de Coleta e Cálculo de Métricas de Vídeos do YouTube (VPH e Outlier 
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional
+import sys
 import requests
 import json
 
@@ -92,21 +93,6 @@ def extract_video_heatmap_and_chapters(youtube_id: str) -> Dict[str, Any]:
         }
 
     import subprocess
-    import sys
-
-    cmd = [
-        sys.executable,
-        "-m",
-        "yt_dlp",
-        "--dump-single-json",
-        "--skip-download",
-        "--ignore-no-formats-error",
-        "--js-runtimes",
-        "node",
-        "--no-warnings",
-        f"https://www.youtube.com/watch?v={youtube_id}",
-    ]
-
     config_dir = Path("./config")
     valid_cookies = [
         c for c in [
@@ -115,12 +101,32 @@ def extract_video_heatmap_and_chapters(youtube_id: str) -> Dict[str, Any]:
             Path(settings.YTDLP_COOKIES_PATH),
         ] if c.exists() and c.stat().st_size > 0
     ]
-    if valid_cookies:
-        freshest_cookie = max(valid_cookies, key=lambda c: c.stat().st_mtime)
-        cmd.extend(["--cookies", str(freshest_cookie)])
+    freshest_cookie = max(valid_cookies, key=lambda c: c.stat().st_mtime) if valid_cookies else None
+
+    def _run_meta(use_cookies: bool = False):
+        base_cmd = [
+            sys.executable,
+            "-m",
+            "yt_dlp",
+            "--dump-single-json",
+            "--skip-download",
+            "--ignore-no-formats-error",
+            "--js-runtimes",
+            "node",
+            "--remote-components",
+            "ejs:github",
+            "--no-warnings",
+        ]
+        if use_cookies and freshest_cookie:
+            base_cmd.extend(["--cookies", str(freshest_cookie)])
+        base_cmd.append(f"https://www.youtube.com/watch?v={youtube_id}")
+        return subprocess.run(base_cmd, capture_output=True, text=True, timeout=40)
 
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
+        res = _run_meta(use_cookies=False)
+        if res.returncode != 0 and freshest_cookie:
+            res = _run_meta(use_cookies=True)
+
         if res.returncode == 0 and res.stdout.strip():
             data = json.loads(res.stdout)
             raw_heatmap = data.get("heatmap") or []
@@ -247,19 +253,6 @@ def fetch_video_metrics_fallback(youtube_id: str) -> Optional[Dict[str, Any]]:
     import subprocess
     import sys
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "yt_dlp",
-        "--dump-single-json",
-        "--skip-download",
-        "--ignore-no-formats-error",
-        "--js-runtimes",
-        "node",
-        "--no-warnings",
-        f"https://www.youtube.com/watch?v={youtube_id}",
-    ]
-
     config_dir = Path("./config")
     valid_cookies = [
         c for c in [
@@ -268,12 +261,32 @@ def fetch_video_metrics_fallback(youtube_id: str) -> Optional[Dict[str, Any]]:
             Path(settings.YTDLP_COOKIES_PATH),
         ] if c.exists() and c.stat().st_size > 0
     ]
-    if valid_cookies:
-        freshest_cookie = max(valid_cookies, key=lambda c: c.stat().st_mtime)
-        cmd.extend(["--cookies", str(freshest_cookie)])
+    freshest_cookie = max(valid_cookies, key=lambda c: c.stat().st_mtime) if valid_cookies else None
+
+    def _run_extract(use_cookies: bool = False):
+        base_cmd = [
+            sys.executable,
+            "-m",
+            "yt_dlp",
+            "--dump-single-json",
+            "--skip-download",
+            "--ignore-no-formats-error",
+            "--js-runtimes",
+            "node",
+            "--remote-components",
+            "ejs:github",
+            "--no-warnings",
+        ]
+        if use_cookies and freshest_cookie:
+            base_cmd.extend(["--cookies", str(freshest_cookie)])
+        base_cmd.append(f"https://www.youtube.com/watch?v={youtube_id}")
+        return subprocess.run(base_cmd, capture_output=True, text=True, timeout=40)
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
+        result = _run_extract(use_cookies=False)
+        if result.returncode != 0 and freshest_cookie:
+            result = _run_extract(use_cookies=True)
+
         if result.returncode == 0 and result.stdout.strip():
             data = json.loads(result.stdout)
             raw_ts = data.get("timestamp") or data.get("release_timestamp")

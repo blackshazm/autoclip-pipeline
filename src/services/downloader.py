@@ -51,28 +51,7 @@ def download_youtube_video(youtube_id: str, output_dir: Optional[Path] = None) -
 
     import sys
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "yt_dlp",
-        "--js-runtimes",
-        "node",
-        "--format",
-        "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
-        "--merge-output-format",
-        "mp4",
-        "--output",
-        temp_template,
-        "--no-playlist",
-        "--no-warnings",
-        "--limit-rate",
-        "15M",  # Prevenção contra bloqueio por banda excessiva
-        "--extractor-args",
-        "youtube:player_client=android,web",
-        url,
-    ]
-
-    # Injeta cookies se o arquivo existir (prioriza o arquivo mais recentemente atualizado)
+    # Identifica cookies válidos caso seja necessário fallback (ex: restrição de idade)
     config_dir = Path("./config")
     cookie_candidates = [
         config_dir / "cookies_fitness.txt",
@@ -82,16 +61,52 @@ def download_youtube_video(youtube_id: str, output_dir: Optional[Path] = None) -
     valid_cookies = [c for c in cookie_candidates if c.exists() and c.stat().st_size > 0]
     cookies_target = max(valid_cookies, key=lambda c: c.stat().st_mtime) if valid_cookies else None
 
-    if cookies_target:
-        cmd.extend(["--cookies", str(cookies_target)])
-        logger.debug(f"Utilizando {cookies_target.name} (atualizado em {cookies_target.stat().st_mtime}) para yt-dlp.")
+    def _execute_ytdlp(use_cookies: bool = False) -> subprocess.CompletedProcess:
+        cmd = [
+            sys.executable,
+            "-m",
+            "yt_dlp",
+            "--js-runtimes",
+            "node",
+            "--remote-components",
+            "ejs:github",
+            "--format",
+            "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+            "--merge-output-format",
+            "mp4",
+            "--output",
+            temp_template,
+            "--no-playlist",
+            "--no-warnings",
+            "--limit-rate",
+            "15M",  # Prevenção contra bloqueio por banda excessiva
+        ]
+        if use_cookies and cookies_target:
+            cmd.extend(["--cookies", str(cookies_target)])
+            logger.debug(f"Utilizando cookies ({cookies_target.name}) para {youtube_id}.")
+        cmd.append(url)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=900)
 
     logger.info(
         f"Iniciando download do vídeo {youtube_id}...", extra={"event": "download_start", "youtube_id": youtube_id}
     )
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        # Prioriza uso de cookies se disponíveis (canais jornalísticos como Record News exigem sessão ativa).
+        # Caso falhe ou não haja cookies, executa fallback sem cookies (para canais que bloqueiam sessões web).
+        primary_cookies = bool(cookies_target)
+        result = _execute_ytdlp(use_cookies=primary_cookies)
+
+        # Se falhou e podemos tentar o modo alternativo
+        if result.returncode != 0 and cookies_target:
+            fallback_cookies = not primary_cookies
+            desc = "sem cookies" if not fallback_cookies else f"com {cookies_target.name}"
+            logger.warning(
+                f"Download primário falhou para {youtube_id} (code {result.returncode}). Tentando fallback {desc}..."
+            )
+            _cleanup_temp_files(dest_dir, youtube_id)
+            result = _execute_ytdlp(use_cookies=fallback_cookies)
+
         if result.returncode != 0:
             logger.error(
                 f"Falha no download yt-dlp para {youtube_id}: {result.stderr}",
