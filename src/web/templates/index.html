@@ -981,23 +981,26 @@
         <span style="font-size: 12px; color: var(--text-muted);">Clique no vídeo para assistir e aprovar</span>
     </div>
     <section class="clips-grid">
-        <template x-for="clip in clips" :key="clip.id">
+        <template x-for="(clip, idx) in clips" :key="clip.id || idx">
             <div class="clip-card">
                 <div class="clip-thumb-container" @click="openModal(clip)">
                     <video :src="'/media/' + clip.filename" preload="metadata" muted></video>
                     <div class="play-overlay-btn">▶</div>
                     <span class="clip-badge-niche" x-text="clip.niche || 'Geral'"></span>
-                    <span class="clip-badge-score" x-text="'Viral: ' + (clip.virality_score || '85') + '%'"></span>
+                    <span class="clip-badge-score" x-text="'Viral: ' + (clip.virality_score || 85) + '%'"></span>
                 </div>
                 <div class="clip-body">
-                    <div class="clip-title" x-text="clip.title"></div>
-                    <div style="font-size: 11px; color: var(--text-dim);" x-text="'ID #' + clip.id + ' • ' + (clip.duration || 0) + 's'"></div>
+                    <div class="clip-title" x-text="clip.title || clip.filename || ('Corte #' + clip.id)"></div>
+                    <div style="font-size: 11px; color: var(--text-dim);" x-text="'ID #' + clip.id + ' • ' + Math.round(clip.duration_seconds || clip.duration || 0) + 's'"></div>
                     <div class="clip-actions">
                         <button class="btn btn-primary" style="flex: 1; padding: 7px;" @click="openModal(clip)">👁️ Curar & Editar</button>
                     </div>
                 </div>
             </div>
         </template>
+        <div x-show="!clips || clips.length === 0" style="grid-column: 1 / -1; text-align: center; color: var(--text-muted); padding: 32px; background: rgba(17, 24, 39, 0.4); border: 1px dashed var(--card-border); border-radius: 14px;">
+            🎬 Nenhum corte finalizado encontrado ainda ou esteira minerando o primeiro lote.
+        </div>
     </section>
 
     <!-- TERMINAL DE LOGS AO VIVO -->
@@ -1260,8 +1263,12 @@
                     try {
                         const res = await fetch('/api/clips?limit=24');
                         const data = await res.json();
-                        if (data.ok) this.clips = data.clips;
-                    } catch (e) {}
+                        if (data.ok && Array.isArray(data.clips)) {
+                            this.clips = data.clips;
+                        }
+                    } catch (e) {
+                        console.warn("Aviso ao carregar clips:", e);
+                    }
                 },
 
                 connectTelemetryWS() {
@@ -1427,6 +1434,28 @@
                 async submitAddChannel() {
                     if (!this.newChannel.identifier || !this.newChannel.identifier.trim()) {
                         alert('Informe o identificador (@handle, URL ou ID) do canal.');
+                        return;
+                    }
+                    this.channelLoading = true;
+                    try {
+                        const res = await fetch('/api/channels', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.newChannel)
+                        });
+                        const data = await res.json();
+                        if (res.ok && data.ok) {
+                            alert(`✅ Canal cadastrado com sucesso!`);
+                            this.closeChannelModal();
+                            this.loadChannels();
+                        } else {
+                            alert('❌ Erro ao adicionar canal: ' + (data.detail || data.error || 'Falha desconhecida'));
+                        }
+                    } catch (err) {
+                        alert('❌ Erro de conexão: ' + err);
+                    } finally {
+                        this.channelLoading = false;
+                    }
                 },
 
                 handleCanvasMouseMove(e) {
