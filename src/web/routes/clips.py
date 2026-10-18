@@ -26,11 +26,14 @@ class ReschedulePayload(BaseModel):
 
 @router.get("/clips")
 async def list_clips(limit: int = 50, status: Optional[str] = None):
-    """Retorna os cortes mais recentes com metadados e status de agendamento."""
+    """Retorna os cortes mais recentes com metadados e status de agendamento agrupados por ID."""
     query = """
         SELECT c.id, c.clip_uid, c.file_path, c.title, c.description, c.tags,
                c.virality_score, c.duration_seconds, c.created_at, c.scheduled_for,
-               p.id as pub_id, p.platform, p.status as pub_status, p.published_at
+               GROUP_CONCAT(DISTINCT p.platform) as platforms,
+               GROUP_CONCAT(DISTINCT p.status) as pub_statuses,
+               MAX(p.id) as pub_id,
+               MAX(p.published_at) as published_at
         FROM clips c
         LEFT JOIN publications p ON c.id = p.clip_id
     """
@@ -38,7 +41,7 @@ async def list_clips(limit: int = 50, status: Optional[str] = None):
     if status:
         query += " WHERE p.status = ? "
         params.append(status)
-    query += " ORDER BY c.id DESC LIMIT ?;"
+    query += " GROUP BY c.id ORDER BY c.id DESC LIMIT ?;"
     params.append(limit)
 
     with get_db() as conn:
